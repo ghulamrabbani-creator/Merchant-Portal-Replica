@@ -1,6 +1,6 @@
 # Geidea Merchant Portal — Design Reference Replica
 
-A visual/functional replica of the Geidea merchant portal (MPGS/CYBS gateway),
+A visual/functional replica of the Geidea merchant portal (MPGS/CYBS gateway), 
 built for internal use as:
 1. A visual reference for developers when requesting UI changes
 2. A design sandbox for prototyping enhancements
