@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f5f6f8;
+  --foreground: #1f2430;
+
+  /* Geidea portal palette (captured from live portal) */
+  --sidebar-bg: #15151f;
+  --sidebar-text: #b8b8c4;
+  --sidebar-text-active: #ffffff;
+  --sidebar-active-bg: #23232f;
+
+  --brand-orange: #f2621f;
+  --brand-orange-light: #fdeee6;
+  --brand-blue: #2f3ea3;
+  --brand-blue-hover: #26317f;
+
+  --text-primary: #1f2430;
+  --text-secondary: #6b7280;
+  --text-muted: #9599a6;
+
+  --border-color: #e8e9ed;
+  --card-bg: #ffffff;
+  --page-bg: #f5f6f8;
+
+  --status-pending: #e8a93d;
+  --status-approved: #3b5bdb;
+  --status-declined: #e08a8a;
+  --status-completed: #2fa84f;
+  --status-submitted: #9599a6;
+  --status-expired: #e0574a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-sidebar-text: var(--sidebar-text);
+  --color-sidebar-active-bg: var(--sidebar-active-bg);
+  --color-brand-orange: var(--brand-orange);
+  --color-brand-orange-light: var(--brand-orange-light);
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-blue-hover: var(--brand-blue-hover);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-border-color: var(--border-color);
+  --color-card-bg: var(--card-bg);
+  --color-page-bg: var(--page-bg);
+
+  --color-status-pending: var(--status-pending);
+  --color-status-approved: var(--status-approved);
+  --color-status-declined: var(--status-declined);
+  --color-status-completed: var(--status-completed);
+  --color-status-submitted: var(--status-submitted);
+  --color-status-expired: var(--status-expired);
+}
+
+body {
+  background: var(--page-bg);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4d5db;
+  border-radius: 4px;
+}
