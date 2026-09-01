@@ -9,6 +9,7 @@ import {
   FileText,
   Link2,
   User,
+  Landmark,
   ChevronDown,
   ChevronLeft,
 } from "lucide-react";
@@ -19,6 +20,7 @@ const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Transactions", href: "/transactions", icon: ArrowLeftRight },
   { label: "Payouts", href: "/payouts", icon: Briefcase },
+  { label: "Direct Debit", href: "/direct-debit", icon: Landmark },
 ];
 
 const reportsItems = [{ label: "Statements", href: "/reports/statements" }];
