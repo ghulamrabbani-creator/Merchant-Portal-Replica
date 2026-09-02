@@ -129,6 +129,77 @@ export const DD_FREQUENCIES = [
 ] as const;
 export type DDFrequency = (typeof DD_FREQUENCIES)[number];
 
+// UAE bank list, per DDS REST API documentation's "Banks Master Table" (Direct Debit
+// Marketplace / Central Bank bank registry). Used to populate the bank-selection dropdown
+// on contract creation (Bank Account name + Credit Card issuing bank). Alphabetized for
+// the picker; the DDS table itself is keyed by an internal bank id we don't need here.
+// Excludes "DDS Market Place(DDMP) NBF" — a platform/system entry in the master table,
+// not a real customer bank.
+export const DDS_BANKS = [
+  "Abu Dhabi Commercial Bank",
+  "Abu Dhabi Islamic Bank",
+  "Ajman Bank",
+  "Al Ahli Bank Of Kuwait K.S.C.",
+  "Al Ain Finance PJSC",
+  "Al Hilal Bank",
+  "Al Khaliji France S.A.",
+  "Al Maryah Community Bank",
+  "Al Masraf",
+  "AMEX (Middle East) - B.S.C",
+  "Arab African International Bank",
+  "Arab Bank",
+  "Arab Emirates Investment Bank",
+  "Banque Banorient France",
+  "Banque Misr",
+  "Bank Melli Iran",
+  "Bank of Baroda",
+  "Bank of Sharjah",
+  "Bank Saderat Iran",
+  "Barclays Bank",
+  "BNP Paribas",
+  "BOK International Bank",
+  "Calyon Investment and Corporate Bank",
+  "Citibank NA",
+  "Commercial Bank International PSC",
+  "Commercial Bank of Dubai",
+  "Doha Bank",
+  "Dubai First PJSC",
+  "Dubai Islamic Bank",
+  "El Nilein Bank",
+  "Emirates Development Bank",
+  "Emirates Islamic Bank PJSC",
+  "Emiratesnbd Bank PJSC",
+  "Finance House",
+  "Finance House LLC",
+  "First Abu Dhabi Bank",
+  "Gulf International Bank",
+  "Habib Bank AG Zurich",
+  "Habib Bank Limited",
+  "HSBC Middle East",
+  "Industrial and Commercial Bank of China",
+  "Investbank PSC",
+  "Janata Bank",
+  "MAF Finance",
+  "Mashreqbank PSC",
+  "National Bank of Fujairah",
+  "National Bank Of Bahrain",
+  "National Bank of Kuwait",
+  "National Bank of Oman",
+  "National Bank of Umm Al Qaiwain",
+  "RAK Bank",
+  "Rafidain Bank",
+  "Ruya Community Islamic Bank LLC",
+  "Samaa Finance PSC",
+  "Sharjah Islamic Bank",
+  "Siraj Finance",
+  "Standard Chartered Bank",
+  "The Saudi National Bank",
+  "United Arab Bank",
+  "United Bank Ltd.",
+  "Wio Bank PJSC",
+  "ZAND BANK",
+] as const;
+
 export type DDInstrumentType = "Bank Account" | "Credit Card";
 export type DDAmountType = "Fixed" | "Variable";
 
