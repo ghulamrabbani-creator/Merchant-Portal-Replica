@@ -6,7 +6,10 @@ import {
   RecurringPayment,
   BulkUpload,
   DirectDebitContract,
+  DirectDebitOccurrence,
+  DDFrequency,
 } from "./types";
+import { occurrenceBaseDate, formatDateNice } from "./direct-debit";
 
 export const STORE_NAME = "Acme Retail Demo LLC";
 
@@ -440,151 +443,271 @@ export const bulkUploads: BulkUpload[] = [
 ];
 
 // ---- Direct Debit ----
+//
+// Occurrence generation: each contract's occurrence count is derived from its own
+// commencesOn -> expiresOn term at its frequency (Direct Debit.md backlog: "Occurrence count
+// doesn't match the contract's own term"). `genOccurrences` takes the ISO anchor date each
+// contract's occurrences actually start from plus an explicit count — the count is chosen per
+// contract below to match that contract's own stated period, not hardcoded to a year across
+// the board (dd1: 6mo/6, dd2: ~1yr/12, dd4: 4mo/4, dd5: 2yr/24, dd7: ~1yr/12). The one legitimate
+// exception is a Cancelled contract (dd8): cancellation stops the schedule early, so its
+// occurrence count reflects the contract's actual life, not its original nominal term.
+function genOccurrences(
+  isoStart: string,
+  frequency: DDFrequency,
+  count: number,
+  amount: number,
+  overrides: Record<number, Partial<DirectDebitOccurrence>> = {}
+): DirectDebitOccurrence[] {
+  const list: DirectDebitOccurrence[] = [];
+  for (let i = 0; i < count; i++) {
+    const seq = i + 1;
+    const date = occurrenceBaseDate(isoStart, frequency, i);
+    const base: DirectDebitOccurrence = {
+      seq,
+      dueDate: formatDateNice(date),
+      amount,
+      status: "Scheduled",
+      rolledOver: "none",
+    };
+    list.push({ ...base, ...(overrides[seq] || {}) });
+  }
+  return list;
+}
+
 export const directDebitContracts: DirectDebitContract[] = [
   {
     id: "dd1",
     ref: "DD-2026-00142",
     merchantRef: "INV-2026-08421",
+    notes: "Residential lease — Building 12, Unit 304",
+    createdOn: "01 Sep 2026, 09:14 AM",
     customerName: "Sara Ibrahim",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1990-1234567-1",
     instrumentType: "Bank Account",
+    bankName: "Emirates NBD",
+    maskedInstrumentRef: "•••4821",
     commencesOn: "05 Sep 2026",
-    expiresOn: "05 Sep 2027",
+    expiresOn: "05 Feb 2027", // 6-month term
     frequency: "Monthly",
+    amountType: "Fixed",
+    minAmount: 4000,
+    maxAmount: 4000,
     prevDeduction: { amount: 4000, date: "05 Sep 2026", ok: true },
     nextDue: { amount: 4000, date: "05 Oct 2026" },
+    rolloverEnabled: true,
     rolloversAllowed: 2,
+    rolloverRemaining: 2,
     status: "Active",
-    occurrences: [
-      { seq: 1, dueDate: "05 Sep 2026", amount: 4000, status: "Paid", rolledOver: false, collectedOn: "05 Sep 2026" },
-      { seq: 2, dueDate: "05 Oct 2026", amount: 4000, status: "Scheduled", rolledOver: null },
-      { seq: 3, dueDate: "05 Nov 2026", amount: 4000, status: "Scheduled", rolledOver: null },
-      { seq: 4, dueDate: "05 Dec 2026", amount: 4000, status: "Scheduled", rolledOver: null },
-    ],
+    subscriptionStatus: "Active",
+    occurrences: genOccurrences("2026-09-05", "Monthly", 6, 4000, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: "05 Sep 2026", payoutStatus: "Settled" },
+      2: { status: "Failed", rolledOver: "none", retryCount: 1, payoutStatus: "—", note: "Insufficient funds — 1 of 3 retries used" },
+    }),
   },
   {
     id: "dd2",
     ref: "DD-2026-00139",
     merchantRef: "INV-2026-08144",
+    createdOn: "25 Aug 2026, 02:30 PM",
     customerName: "Youssef Haddad",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1988-2345678-2",
     instrumentType: "Credit Card",
+    maskedInstrumentRef: "•••7734",
     commencesOn: "01 Sep 2026",
-    expiresOn: "01 Sep 2027",
+    expiresOn: "01 Aug 2027", // 12 monthly occurrences
     frequency: "Monthly",
+    amountType: "Fixed",
+    minAmount: 6200,
+    maxAmount: 6200,
     prevDeduction: { amount: 6200, date: "01 Sep 2026", ok: false },
     nextDue: { amount: 6200, date: "01 Oct 2026" },
+    rolloverEnabled: false,
     rolloversAllowed: 0,
+    rolloverRemaining: 0,
     status: "Active",
-    occurrences: [
-      { seq: 1, dueDate: "01 Sep 2026", amount: 6200, status: "Failed", rolledOver: false, note: "Rollover not enabled for this contract" },
-      { seq: 2, dueDate: "01 Oct 2026", amount: 6200, status: "Scheduled", rolledOver: null },
-      { seq: 3, dueDate: "01 Nov 2026", amount: 6200, status: "Scheduled", rolledOver: null },
-    ],
+    subscriptionStatus: "Active",
+    statusNote: "1 failed occurrence — contract remains Active (rollover not configured)",
+    occurrences: genOccurrences("2026-09-01", "Monthly", 12, 6200, {
+      1: { status: "Failed", rolledOver: "none", retryCount: 3, payoutStatus: "—", note: "3 of 3 retries exhausted — no rollover configured" },
+    }),
   },
   {
     id: "dd3",
     ref: "DD-2026-00135",
     merchantRef: "INV-2026-07998",
+    createdOn: "18 Aug 2026, 11:00 AM",
     customerName: "Fatima Al Marri",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1992-3456789-3",
     instrumentType: "Bank Account",
+    bankName: "Mashreq",
+    maskedInstrumentRef: "•••2290",
     commencesOn: "20 Aug 2026",
-    expiresOn: "20 Aug 2027",
+    expiresOn: "20 May 2027", // 9-month term, quarterly -> 4 occurrences once active
     frequency: "Quarterly",
+    amountType: "Fixed",
+    minAmount: 15000,
+    maxAmount: 15000,
     nextDue: { amount: 15000, date: "20 Nov 2026" },
+    rolloverEnabled: true,
     rolloversAllowed: 3,
+    rolloverRemaining: 3,
     status: "Pending Bank Approval",
+    subscriptionStatus: "Active",
     occurrences: [],
-    emptyNote: "No collections yet — contract is pending bank approval.",
+    emptyNote: "No collections yet — contract is pending bank approval. Once Active, 4 quarterly occurrences will be generated through 20 May 2027.",
   },
   {
     id: "dd4",
     ref: "DD-2026-00128",
     merchantRef: "INV-2026-07711",
+    createdOn: "10 Jul 2026, 04:45 PM",
     customerName: "Omar Khaled",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1985-4567890-4",
     instrumentType: "Bank Account",
+    bankName: "First Abu Dhabi Bank",
+    maskedInstrumentRef: "•••5013",
     commencesOn: "15 Jul 2026",
-    expiresOn: "15 Jul 2027",
+    expiresOn: "15 Oct 2026", // 4-month term
     frequency: "Monthly",
+    amountType: "Fixed",
+    minAmount: 3500,
+    maxAmount: 3500, // ceiling equals the installment itself — any rollover attempt is necessarily blocked
     prevDeduction: { amount: 3500, date: "15 Aug 2026", ok: false },
-    rolloversAllowed: 0,
-    status: "Suspended",
-    occurrences: [
-      { seq: 1, dueDate: "15 Jul 2026", amount: 3500, status: "Paid", rolledOver: false, collectedOn: "15 Jul 2026" },
-      { seq: 2, dueDate: "15 Aug 2026", amount: 3500, status: "Failed", rolledOver: false, note: "3 of 3 retries exhausted — contract suspended" },
-    ],
+    nextDue: { amount: 3500, date: "15 Sep 2026" },
+    rolloverEnabled: true,
+    rolloversAllowed: 1,
+    rolloverRemaining: 1, // unchanged — a block never decrements this (Order Model: only an actual successful roll does)
+    status: "Active", // fixed from "Suspended": a failed collection must not suspend the contract
+    subscriptionStatus: "Active",
+    statusNote: "1 failed occurrence — contract remains Active",
+    occurrences: genOccurrences("2026-07-15", "Monthly", 4, 3500, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: "15 Jul 2026", payoutStatus: "Settled" },
+      2: { status: "Failed", rolledOver: "blocked_by_ceiling", retryCount: 3, payoutStatus: "—", note: "3 of 3 retries exhausted — rollover blocked, would exceed the contract's max amount ceiling" },
+    }),
   },
   {
     id: "dd5",
     ref: "DD-2026-00121",
     merchantRef: "INV-2026-07340",
+    createdOn: "05 Jul 2026, 09:00 AM",
     customerName: "Lina Suleiman",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1990-5678901-5",
     instrumentType: "Credit Card",
+    maskedInstrumentRef: "•••9042",
     commencesOn: "10 Jul 2026",
-    expiresOn: "10 Jul 2027",
+    expiresOn: "10 Jun 2028", // 2-year term -> 24 occurrences (the guided flow's own display cap)
     frequency: "Monthly",
+    amountType: "Fixed",
+    minAmount: 5000,
+    maxAmount: 5000,
     prevDeduction: { amount: 5000, date: "10 Aug 2026", ok: true },
-    nextDue: { amount: 5000, date: "10 Sep 2026" },
+    rolloverEnabled: true,
     rolloversAllowed: 1,
+    rolloverRemaining: 1,
     status: "Active",
-    occurrences: [
-      { seq: 1, dueDate: "10 Jul 2026", amount: 5000, status: "Paid", rolledOver: false, collectedOn: "10 Jul 2026" },
-      { seq: 2, dueDate: "10 Aug 2026", amount: 5000, status: "Paid", rolledOver: false, collectedOn: "10 Aug 2026" },
-      { seq: 3, dueDate: "10 Sep 2026", amount: 5000, status: "Scheduled", rolledOver: null },
-      { seq: 4, dueDate: "10 Oct 2026", amount: 5000, status: "Scheduled", rolledOver: null },
-    ],
+    subscriptionStatus: "Paused",
+    pausedNote: "Subscription paused on 15 Aug 2026 — mandate remains Active. Occurrences due after the pause are not included in payment file submission.",
+    occurrences: genOccurrences("2026-07-10", "Monthly", 24, 5000, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: "10 Jul 2026", payoutStatus: "Settled" },
+      2: { status: "Paid", rolledOver: "none", collectedOn: "10 Aug 2026", payoutStatus: "Settled" },
+      3: { note: "Subscription paused — not included in payment file" },
+    }),
   },
   {
     id: "dd6",
     ref: "DD-2026-00114",
     merchantRef: "INV-2026-06905",
+    createdOn: "28 May 2026, 01:20 PM",
     customerName: "Khalid Al Qahtani",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1979-6789012-6",
     instrumentType: "Bank Account",
+    bankName: "Abu Dhabi Commercial Bank",
+    maskedInstrumentRef: "•••3387",
     commencesOn: "01 Jun 2026",
     expiresOn: "01 Jun 2027",
     frequency: "Monthly",
+    amountType: "Fixed",
+    minAmount: 5200,
+    maxAmount: 5200,
+    rolloverEnabled: false,
     rolloversAllowed: 0,
+    rolloverRemaining: 0,
     status: "Rejected",
+    subscriptionStatus: "Active",
     statusNote: "Invalid Payer Account",
     occurrences: [],
-    emptyNote: "No collections — mandate was rejected (Invalid Payer Account).",
+    emptyNote: "No collections — mandate was rejected (Invalid Payer Account). Subscription never activates for a rejected mandate.",
   },
   {
     id: "dd7",
     ref: "DD-2026-00109",
     merchantRef: "INV-2026-06552",
+    notes: "Service subscription — annual maintenance contract",
+    createdOn: "10 May 2026, 10:10 AM",
     customerName: "Rania Farouk",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1991-7890123-7",
     instrumentType: "Bank Account",
+    bankName: "National Bank of Fujairah",
+    maskedInstrumentRef: "•••1095",
     commencesOn: "15 May 2026",
-    expiresOn: "15 May 2027",
+    expiresOn: "15 Apr 2027", // 12 monthly occurrences
     frequency: "Monthly",
+    amountType: "Variable",
+    minAmount: 4800,
+    maxAmount: 12000,
     prevDeduction: { amount: 4800, date: "15 Aug 2026", ok: true },
     nextDue: { amount: 4800, date: "15 Sep 2026" },
+    rolloverEnabled: true,
     rolloversAllowed: 2,
+    rolloverRemaining: 1,
     status: "Active",
-    occurrences: [
-      { seq: 1, dueDate: "15 May 2026", amount: 4800, status: "Paid", rolledOver: false, collectedOn: "15 May 2026" },
-      { seq: 2, dueDate: "15 Jun 2026", amount: 4800, status: "Failed", rolledOver: false, note: "Folded into the next collection via rollover" },
-      { seq: 3, dueDate: "15 Jul 2026", amount: 9600, status: "Paid", rolledOver: true, collectedOn: "15 Jul 2026", note: "Includes AED 4,800.00 recovered from 15 Jun 2026" },
-      { seq: 4, dueDate: "15 Aug 2026", amount: 4800, status: "Paid", rolledOver: false, collectedOn: "15 Aug 2026" },
-      { seq: 5, dueDate: "15 Sep 2026", amount: 4800, status: "Scheduled", rolledOver: null },
-    ],
+    subscriptionStatus: "Active",
+    occurrences: genOccurrences("2026-05-15", "Monthly", 12, 4800, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: "15 May 2026", payoutStatus: "Settled" },
+      2: { status: "Failed", rolledOver: "rolled_over", retryCount: 3, payoutStatus: "—", note: "3 of 3 retries exhausted — amount rolled onto the next occurrence" },
+      3: { status: "Paid", amount: 9600, rolledOverFrom: 2, collectedOn: "15 Jul 2026", payoutStatus: "Settled", note: "Includes AED 4,800.00 recovered from 15 Jun 2026 (occurrence #2)" },
+      4: { status: "Paid", rolledOver: "none", collectedOn: "15 Aug 2026", payoutStatus: "Settled" },
+    }),
   },
   {
     id: "dd8",
     ref: "DD-2026-00098",
     merchantRef: "INV-2026-06103",
+    createdOn: "20 Mar 2026, 03:15 PM",
     customerName: "Ahmed Mansour",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1983-8901234-8",
     instrumentType: "Bank Account",
+    bankName: "Dubai Islamic Bank",
+    maskedInstrumentRef: "•••6650",
     commencesOn: "05 Apr 2026",
-    expiresOn: "05 Apr 2027",
+    expiresOn: "05 Apr 2027", // original nominal term — cut short by cancellation below
     frequency: "Monthly",
-    prevDeduction: { amount: 4500, date: "05 Aug 2026", ok: true },
+    amountType: "Fixed",
+    minAmount: 4500,
+    maxAmount: 4500,
+    prevDeduction: { amount: 4500, date: "05 Jun 2026", ok: true },
+    rolloverEnabled: false,
     rolloversAllowed: 0,
+    rolloverRemaining: 0,
     status: "Cancelled",
-    occurrences: [
-      { seq: 1, dueDate: "05 Jun 2026", amount: 4500, status: "Paid", rolledOver: false, collectedOn: "05 Jun 2026" },
-      { seq: 2, dueDate: "05 Jul 2026", amount: 4500, status: "Paid", rolledOver: false, collectedOn: "05 Jul 2026" },
-      { seq: 3, dueDate: "05 Aug 2026", amount: 4500, status: "Paid", rolledOver: false, collectedOn: "05 Aug 2026" },
-    ],
-    cancelledNote: "Contract cancelled on 20 Aug 2026 — no further collections.",
+    subscriptionStatus: "Active",
+    // Only 3 of the nominal 12 monthly occurrences were ever generated — cancellation on
+    // 20 Jun 2026 stopped the schedule early. This is the one legitimate case where occurrence
+    // count is less than the full term implies (see file-level comment above).
+    occurrences: genOccurrences("2026-04-05", "Monthly", 3, 4500, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: "05 Apr 2026", payoutStatus: "Settled" },
+      2: { status: "Paid", rolledOver: "none", collectedOn: "05 May 2026", payoutStatus: "Settled" },
+      3: { status: "Paid", rolledOver: "none", collectedOn: "05 Jun 2026", payoutStatus: "Settled" },
+    }),
+    cancelledNote: "Contract cancelled on 20 Jun 2026 — no further collections.",
   },
 ];
