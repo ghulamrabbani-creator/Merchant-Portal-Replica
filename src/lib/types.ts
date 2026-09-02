@@ -140,15 +140,30 @@ export type DDContractStatus =
   | "Rejected"
   | "Cancelled";
 
+/** Subscription-level only — independent of the Mandate's own DDContractStatus above.
+ *  See Notes/Projects/Direct Debit.md, Contract Detail screen §Pause: Pause suspends the
+ *  Subscription only, the Mandate stays Active throughout. */
+export type DDSubscriptionStatus = "Active" | "Paused";
+
 export type DDOccurrenceStatus = "Paid" | "Failed" | "Scheduled";
+
+/** Tri-state per Order Model `Occurrence.rolled_over`. Set on the occurrence that FAILED and
+ *  had its amount folded forward — not on the destination occurrence that received it (that one
+ *  is only cross-referenced via `rolledOverFrom`). See Direct Debit.md backlog: "Rolled Over Yes
+ *  is on the wrong row." */
+export type DDRolloverState = "none" | "rolled_over" | "blocked_by_ceiling";
 
 export interface DirectDebitOccurrence {
   seq: number;
   dueDate: string; // "05 Sep 2026"
   amount: number;
   status: DDOccurrenceStatus;
-  /** null = not yet resolved (Scheduled); only meaningful once an occurrence has actually settled */
-  rolledOver: boolean | null;
+  rolledOver: DDRolloverState;
+  /** Set on the destination occurrence only: seq of the failed occurrence whose amount rolled in here. */
+  rolledOverFrom?: number;
+  /** Times Payment Representment has been called for this occurrence, capped at 3 (see Order Model `Payment.retry_count`). */
+  retryCount?: number;
+  payoutStatus?: string; // "Settled" | "Pending settlement" | "—" — Order Model has no dedicated field yet, backend/APEX-derived
   collectedOn?: string;
   note?: string;
 }
@@ -157,18 +172,30 @@ export interface DirectDebitContract {
   id: string;
   ref: string; // DDS mandate reference shown to the merchant, e.g. DD-2026-00142
   merchantRef: string; // dda_reference_number — merchant-typed, see Order Model
-  notes?: string;
+  notes?: string; // Mandate.notes — merchant-only, never shown to the customer
+  createdOn: string; // "28 Aug 2026, 10:15 AM"
   customerName: string;
+  customerIdType: string; // e.g. "Emirates ID"
+  customerIdNumber: string;
   instrumentType: DDInstrumentType;
+  bankName?: string; // Bank Account only
+  maskedInstrumentRef: string; // masked IBAN or card, e.g. "•••1095"
   commencesOn: string; // "05 Sep 2026" — mandate validity start
   expiresOn: string; // mandate validity end
   frequency: DDFrequency; // contract frequency ceiling
+  amountType: DDAmountType;
+  minAmount: number;
+  maxAmount: number;
   prevDeduction?: { amount: number; date: string; ok: boolean };
   nextDue?: { amount: number; date: string };
-  rolloversAllowed: number; // rollover_count_remaining
+  rolloverEnabled: boolean;
+  rolloversAllowed: number; // max rollover events over the subscription's life
+  rolloverRemaining: number; // counter, decremented only on an actual successful roll
   status: DDContractStatus;
+  subscriptionStatus: DDSubscriptionStatus;
   statusNote?: string;
   occurrences: DirectDebitOccurrence[];
   emptyNote?: string;
   cancelledNote?: string;
+  pausedNote?: string;
 }
