@@ -160,9 +160,14 @@ export default function ContractDetailPage({
       <div className="mb-2 flex gap-3">
         <StatCard label="Customer" value={c.customerName} sub={c.customerIdNumber} />
         <StatCard
-          label="Collected"
+          label="Successful Collections"
           value={formatMoneyAED(summary.collected)}
           sub={`${summary.paid.length} of ${occurrences.length} installments`}
+        />
+        <StatCard
+          label="Failed Collections"
+          value={formatMoneyAED(summary.failed.reduce((sum, o) => sum + o.amount, 0))}
+          sub={`${summary.failed.length} of ${occurrences.length} installments`}
         />
         <StatCard
           label="Outstanding"
@@ -196,8 +201,6 @@ export default function ContractDetailPage({
               label={c.amountType === "Fixed" ? "Amount per installment" : "Min / Max amount"}
               value={c.amountType === "Fixed" ? formatMoneyAED(c.minAmount) : `${formatMoneyAED(c.minAmount)} – ${formatMoneyAED(c.maxAmount)}`}
             />
-            <Field label="Successful collections" value={summary.paid.length} />
-            <Field label="Failed collections" value={summary.failed.length} />
             <Field
               label="Payment method"
               value={
@@ -275,7 +278,9 @@ export default function ContractDetailPage({
                           ? "Yes"
                           : o.rolledOver === "blocked_by_ceiling"
                             ? "Blocked"
-                            : "—"}
+                            : !c.rolloverEnabled
+                              ? "Not Available"
+                              : "—"}
                       </td>
                       <td className="px-3.5 py-2 text-text-muted">{o.payoutStatus || "—"}</td>
                       <td className="px-3.5 py-2 text-text-muted">{o.collectedOn || "—"}</td>
