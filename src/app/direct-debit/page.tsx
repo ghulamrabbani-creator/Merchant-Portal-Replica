@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChevronDown, Plus, Landmark, CreditCard, RotateCw, MoreVertical, PauseCircle } from "lucide-react";
+import { ChevronDown, Plus, Landmark, CreditCard, MoreVertical } from "lucide-react";
 import clsx from "clsx";
 import PageHeader from "@/components/ui/PageHeader";
 import SearchBar from "@/components/ui/SearchBar";
@@ -13,6 +13,18 @@ import DirectDebitFiltersButton from "@/components/directdebit/DirectDebitFilter
 import CreateDirectDebitContractModal from "@/components/directdebit/CreateDirectDebitContractModal";
 import { directDebitContracts } from "@/lib/mock-data";
 import { formatMoneyAED } from "@/lib/direct-debit";
+import { DirectDebitContract } from "@/lib/types";
+
+function collectionSummary(c: DirectDebitContract) {
+  const successful = c.occurrences.filter((o) => o.status === "Paid");
+  const failed = c.occurrences.filter((o) => o.status === "Failed");
+  return {
+    successCount: successful.length,
+    successAmount: successful.reduce((sum, o) => sum + o.amount, 0),
+    failCount: failed.length,
+    failAmount: failed.reduce((sum, o) => sum + o.amount, 0),
+  };
+}
 
 export default function DirectDebitPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -67,7 +79,8 @@ export default function DirectDebitPage() {
               <th className="px-4 py-3 font-medium">Frequency</th>
               <th className="px-4 py-3 font-medium">Previous Deduction</th>
               <th className="px-4 py-3 font-medium">Next Due</th>
-              <th className="px-4 py-3 font-medium">Rollover</th>
+              <th className="px-4 py-3 font-medium">Successful Collections</th>
+              <th className="px-4 py-3 font-medium">Failed Collections</th>
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="w-10 px-4 py-3" />
             </tr>
@@ -75,6 +88,7 @@ export default function DirectDebitPage() {
           <tbody>
             {directDebitContracts.map((c) => {
               const isOpen = expanded === c.id;
+              const summary = collectionSummary(c);
               return (
                 <>
                   <tr
@@ -146,11 +160,21 @@ export default function DirectDebitPage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {c.rolloverEnabled ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-orange-light px-2.5 py-1 text-xs font-semibold text-brand-orange">
-                          <RotateCw size={11} strokeWidth={2.2} />
-                          {c.rolloverRemaining} left
-                        </span>
+                      {summary.successCount > 0 ? (
+                        <>
+                          <span className="font-semibold text-status-completed">{summary.successCount}</span>
+                          <div className="text-xs text-text-muted">{formatMoneyAED(summary.successAmount)}</div>
+                        </>
+                      ) : (
+                        <span className="text-text-muted">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {summary.failCount > 0 ? (
+                        <>
+                          <span className="font-semibold text-status-declined">{summary.failCount}</span>
+                          <div className="text-xs text-text-muted">{formatMoneyAED(summary.failAmount)}</div>
+                        </>
                       ) : (
                         <span className="text-text-muted">—</span>
                       )}
@@ -158,10 +182,7 @@ export default function DirectDebitPage() {
                     <td className="px-4 py-3">
                       <StatusDot status={c.status} />
                       {c.subscriptionStatus === "Paused" && (
-                        <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-status-pending px-2 py-0.5 text-[11px] font-medium text-status-pending">
-                          <PauseCircle size={11} />
-                          Subscription paused
-                        </span>
+                        <div className="mt-0.5 text-xs text-text-muted">Subscription paused</div>
                       )}
                       {c.statusNote && (
                         <div className="mt-0.5 text-xs text-text-muted">{c.statusNote}</div>
@@ -173,7 +194,7 @@ export default function DirectDebitPage() {
                   </tr>
                   {isOpen && (
                     <tr className="border-b border-border-color bg-page-bg/40">
-                      <td colSpan={11} className="px-4 py-4 pl-14">
+                      <td colSpan={12} className="px-4 py-4 pl-14">
                         {c.occurrences.length > 0 ? (
                           <>
                             <div className="overflow-hidden rounded-lg border border-border-color">
@@ -210,7 +231,9 @@ export default function DirectDebitPage() {
                                           ? "Yes"
                                           : o.rolledOver === "blocked_by_ceiling"
                                             ? "Blocked"
-                                            : "—"}
+                                            : !c.rolloverEnabled
+                                              ? "Not Available"
+                                              : "—"}
                                       </td>
                                       <td className="px-3.5 py-2 text-text-muted">
                                         {o.payoutStatus || "—"}
