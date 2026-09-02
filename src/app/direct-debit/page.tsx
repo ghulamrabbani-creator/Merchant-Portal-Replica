@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, Plus, Landmark, CreditCard, RotateCw, MoreVertical } from "lucide-react";
+import Link from "next/link";
+import { ChevronDown, Plus, Landmark, CreditCard, RotateCw, MoreVertical, PauseCircle } from "lucide-react";
 import clsx from "clsx";
 import PageHeader from "@/components/ui/PageHeader";
 import SearchBar from "@/components/ui/SearchBar";
@@ -28,7 +29,7 @@ export default function DirectDebitPage() {
             <ChevronDown size={14} />
           </button>
           <SearchBar
-            scopes={["Contract Ref", "Customer", "Merchant Ref"]}
+            scopes={["Contract Ref", "Customer Name", "Merchant Ref", "Emirates ID"]}
             placeholder="Search collections, mandates"
           />
         </div>
@@ -95,12 +96,12 @@ export default function DirectDebitPage() {
                       </button>
                     </td>
                     <td className="px-4 py-3">
-                      <button
-                        onClick={() => setExpanded(isOpen ? null : c.id)}
+                      <Link
+                        href={`/direct-debit/${c.id}`}
                         className="font-medium text-brand-blue hover:underline"
                       >
                         {c.ref}
-                      </button>
+                      </Link>
                     </td>
                     <td className="px-4 py-3 text-text-primary">{c.customerName}</td>
                     <td className="px-3 py-3 text-text-secondary">
@@ -145,10 +146,10 @@ export default function DirectDebitPage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {c.rolloversAllowed > 0 ? (
+                      {c.rolloverEnabled ? (
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-orange-light px-2.5 py-1 text-xs font-semibold text-brand-orange">
                           <RotateCw size={11} strokeWidth={2.2} />
-                          {c.rolloversAllowed} left
+                          {c.rolloverRemaining} left
                         </span>
                       ) : (
                         <span className="text-text-muted">—</span>
@@ -156,6 +157,12 @@ export default function DirectDebitPage() {
                     </td>
                     <td className="px-4 py-3">
                       <StatusDot status={c.status} />
+                      {c.subscriptionStatus === "Paused" && (
+                        <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-status-pending px-2 py-0.5 text-[11px] font-medium text-status-pending">
+                          <PauseCircle size={11} />
+                          Subscription paused
+                        </span>
+                      )}
                       {c.statusNote && (
                         <div className="mt-0.5 text-xs text-text-muted">{c.statusNote}</div>
                       )}
@@ -178,6 +185,7 @@ export default function DirectDebitPage() {
                                     <th className="px-3.5 py-2 font-medium">Amount</th>
                                     <th className="px-3.5 py-2 font-medium">Status</th>
                                     <th className="px-3.5 py-2 font-medium">Rolled Over</th>
+                                    <th className="px-3.5 py-2 font-medium">Payout Status</th>
                                     <th className="px-3.5 py-2 font-medium">Collected On</th>
                                   </tr>
                                 </thead>
@@ -198,7 +206,14 @@ export default function DirectDebitPage() {
                                         )}
                                       </td>
                                       <td className="px-3.5 py-2 text-text-muted">
-                                        {o.rolledOver === null ? "—" : o.rolledOver ? "Yes" : "No"}
+                                        {o.rolledOver === "rolled_over"
+                                          ? "Yes"
+                                          : o.rolledOver === "blocked_by_ceiling"
+                                            ? "Blocked"
+                                            : "—"}
+                                      </td>
+                                      <td className="px-3.5 py-2 text-text-muted">
+                                        {o.payoutStatus || "—"}
                                       </td>
                                       <td className="px-3.5 py-2 text-text-muted">
                                         {o.collectedOn || "—"}
