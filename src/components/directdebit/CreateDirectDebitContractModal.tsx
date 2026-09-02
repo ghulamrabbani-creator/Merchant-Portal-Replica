@@ -14,7 +14,7 @@ import {
   parseDateStr,
   toDateInputValue,
 } from "@/lib/direct-debit";
-import { DDAmountType, DDFrequency, DDInstrumentType } from "@/lib/types";
+import { DDAmountType, DDFrequency, DDInstrumentType, DDS_BANKS } from "@/lib/types";
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -267,10 +267,20 @@ export default function CreateDirectDebitContractModal({
               </div>
 
               {bankActive ? (
-                <div className="mb-4 grid grid-cols-2 gap-3.5">
+                <div key="bank-account-fields" className="mb-4 grid grid-cols-2 gap-3.5">
                   <div>
                     <Label>Bank name</Label>
-                    <input defaultValue="Emirates NBD" className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none" />
+                    <select
+                      defaultValue="Emiratesnbd Bank PJSC"
+                      className="w-full rounded-lg border border-border-color bg-white px-3 py-2.5 text-sm outline-none"
+                    >
+                      {DDS_BANKS.map((bank) => (
+                        <option key={bank} value={bank}>
+                          {bank}
+                        </option>
+                      ))}
+                    </select>
+                    <Help>Per the DDS Banks Master Table</Help>
                   </div>
                   <div>
                     <Label>Account holder title</Label>
@@ -282,14 +292,24 @@ export default function CreateDirectDebitContractModal({
                   </div>
                 </div>
               ) : (
-                <div className="mb-4 grid grid-cols-2 gap-3.5">
+                <div key="credit-card-fields" className="mb-4 grid grid-cols-2 gap-3.5">
                   <div>
                     <Label>Card holder name</Label>
                     <input defaultValue="Sara Ibrahim" className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none" />
                   </div>
                   <div>
                     <Label>Issuing bank</Label>
-                    <input defaultValue="Emirates NBD" className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none" />
+                    <select
+                      defaultValue="Emiratesnbd Bank PJSC"
+                      className="w-full rounded-lg border border-border-color bg-white px-3 py-2.5 text-sm outline-none"
+                    >
+                      {DDS_BANKS.map((bank) => (
+                        <option key={bank} value={bank}>
+                          {bank}
+                        </option>
+                      ))}
+                    </select>
+                    <Help>Per the DDS Banks Master Table</Help>
                   </div>
                   <div className="col-span-2">
                     <Label>Card number</Label>
