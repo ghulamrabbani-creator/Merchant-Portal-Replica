@@ -529,9 +529,8 @@ export const directDebitContracts: DirectDebitContract[] = [
     rolloverRemaining: 0,
     status: "Active",
     subscriptionStatus: "Active",
-    statusNote: "1 failed occurrence — contract remains Active (rollover not configured)",
     occurrences: genOccurrences("2026-09-01", "Monthly", 12, 6200, {
-      1: { status: "Failed", rolledOver: "none", retryCount: 3, payoutStatus: "—", note: "3 of 3 retries exhausted — no rollover configured" },
+      1: { status: "Failed", rolledOver: "none", retryCount: 3, payoutStatus: "—", note: "3 of 3 retries exhausted" },
     }),
   },
   {
@@ -584,7 +583,6 @@ export const directDebitContracts: DirectDebitContract[] = [
     rolloverRemaining: 1, // unchanged — a block never decrements this (Order Model: only an actual successful roll does)
     status: "Active", // fixed from "Suspended": a failed collection must not suspend the contract
     subscriptionStatus: "Active",
-    statusNote: "1 failed occurrence — contract remains Active",
     occurrences: genOccurrences("2026-07-15", "Monthly", 4, 3500, {
       1: { status: "Paid", rolledOver: "none", collectedOn: "15 Jul 2026", payoutStatus: "Settled" },
       2: { status: "Failed", rolledOver: "blocked_by_ceiling", retryCount: 3, payoutStatus: "—", note: "3 of 3 retries exhausted — rollover blocked, would exceed the contract's max amount ceiling" },
