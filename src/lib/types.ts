@@ -216,13 +216,33 @@ export type DDContractStatus =
  *  Subscription only, the Mandate stays Active throughout. */
 export type DDSubscriptionStatus = "Active" | "Paused";
 
-export type DDOccurrenceStatus = "Paid" | "Failed" | "Scheduled";
+// "Skipped" (added Sep 2026): an occurrence whose due date passed while the subscription was
+// Paused, so it was never included in a payment file — distinct from Failed (which means it
+// WAS submitted and the bank rejected/errored it). Terminal, like Failed, but carries no
+// retryCount and is never eligible for Retry — only for a merchant-initiated Rollover (see
+// DDRolloverState and canRolloverOccurrence in lib/direct-debit.ts). Set at the T-1 payment-file
+// build step, not at the moment Pause is clicked, so a Resume before the due date arrives lets
+// the occurrence proceed normally instead of being pre-marked.
+export type DDOccurrenceStatus = "Paid" | "Failed" | "Scheduled" | "Skipped";
 
-/** Tri-state per Order Model `Occurrence.rolled_over`. Set on the occurrence that FAILED and
- *  had its amount folded forward — not on the destination occurrence that received it (that one
- *  is only cross-referenced via `rolledOverFrom`). See Direct Debit.md backlog: "Rolled Over Yes
- *  is on the wrong row." */
-export type DDRolloverState = "none" | "rolled_over" | "blocked_by_ceiling";
+/** Per-occurrence flag, independent of `status` — status says WHY an occurrence didn't happen
+ *  as originally due (Failed vs Skipped), rolledOver says WHETHER its amount got folded onto a
+ *  future occurrence. Set on the occurrence whose amount moved — not on the destination that
+ *  received it (that one is only cross-referenced via `rolledOverFrom`). See Direct Debit.md
+ *  backlog: "Rolled Over Yes is on the wrong row."
+ *  - "rolled_over": amount successfully folded onto the next occurrence — automatically, once
+ *    retries are exhausted, for a Failed occurrence; via the Rollover/Undo rollover button, for
+ *    a Skipped one.
+ *  - "blocked_by_ceiling": a rollover was attempted but would have pushed the destination
+ *    occurrence's amount past the contract's max_amount.
+ *  - "exhausted": rollovers_allowed has already been used up by the current CONSECUTIVE streak
+ *    of rolled-over occurrences (see canRolloverOccurrence) — the streak resets the moment any
+ *    occurrence on the subscription is next collected in full (Paid), so this is not a
+ *    lifetime cap, only a per-streak one.
+ *  - "none": not rolled over (default / not yet decided, for a Skipped occurrence awaiting the
+ *    merchant's choice).
+ */
+export type DDRolloverState = "none" | "rolled_over" | "blocked_by_ceiling" | "exhausted";
 
 export interface DirectDebitOccurrence {
   seq: number;
@@ -230,9 +250,9 @@ export interface DirectDebitOccurrence {
   amount: number;
   status: DDOccurrenceStatus;
   rolledOver: DDRolloverState;
-  /** Set on the destination occurrence only: seq of the failed occurrence whose amount rolled in here. */
+  /** Set on the destination occurrence only: seq of the occurrence whose amount rolled in here. */
   rolledOverFrom?: number;
-  /** Times Payment Representment has been called for this occurrence, capped at 3 (see Order Model `Payment.retry_count`). */
+  /** Times Payment Representment has been called for this occurrence, capped at 3 (see Order Model `Payment.retry_count`). Not applicable to Skipped occurrences — nothing was ever submitted, so there's nothing to retry. */
   retryCount?: number;
   payoutStatus?: string; // "Settled" | "Pending settlement" | "—" — Order Model has no dedicated field yet, backend/APEX-derived
   collectedOn?: string;
@@ -260,8 +280,8 @@ export interface DirectDebitContract {
   prevDeduction?: { amount: number; date: string; ok: boolean };
   nextDue?: { amount: number; date: string };
   rolloverEnabled: boolean;
-  rolloversAllowed: number; // max rollover events over the subscription's life
-  rolloverRemaining: number; // counter, decremented only on an actual successful roll
+  rolloversAllowed: number; // max CONSECUTIVE rollovers before the ceiling blocks another — see canRolloverOccurrence; resets after any Paid occurrence, not a lifetime total
+  rolloverRemaining: number; // display-only snapshot for the Mandate details card; the live Rollover-button decision is derived from occurrence history (canRolloverOccurrence), not read from this field
   status: DDContractStatus;
   subscriptionStatus: DDSubscriptionStatus;
   statusNote?: string;
