@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { directDebitContracts } from "@/lib/mock-data";
-import { formatMoneyAED } from "@/lib/direct-debit";
+import { formatMoneyAED, RETRY_CAP } from "@/lib/direct-debit";
 import StatCard from "@/components/ui/StatCard";
 import StatusDot from "@/components/ui/StatusDot";
 import Modal from "@/components/ui/Modal";
@@ -37,8 +37,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </div>
   );
 }
-
-const RETRY_CAP = 3;
 
 export default function ContractDetailPage({
   params,
