@@ -12,7 +12,7 @@ import StatusDot from "@/components/ui/StatusDot";
 import DirectDebitFiltersButton from "@/components/directdebit/DirectDebitFiltersButton";
 import CreateDirectDebitContractModal from "@/components/directdebit/CreateDirectDebitContractModal";
 import { directDebitContracts } from "@/lib/mock-data";
-import { formatMoneyAED } from "@/lib/direct-debit";
+import { formatMoneyAED, RETRY_CAP } from "@/lib/direct-debit";
 import { DirectDebitContract } from "@/lib/types";
 
 function collectionSummary(c: DirectDebitContract) {
@@ -206,7 +206,7 @@ export default function DirectDebitPage() {
                                     <th className="px-3.5 py-2 font-medium">Amount</th>
                                     <th className="px-3.5 py-2 font-medium">Status</th>
                                     <th className="px-3.5 py-2 font-medium">Rolled Over</th>
-                                    <th className="px-3.5 py-2 font-medium">Payout Status</th>
+                                    <th className="px-3.5 py-2 font-medium">Retry Attempts</th>
                                     <th className="px-3.5 py-2 font-medium">Collected On</th>
                                   </tr>
                                 </thead>
@@ -236,7 +236,9 @@ export default function DirectDebitPage() {
                                               : "—"}
                                       </td>
                                       <td className="px-3.5 py-2 text-text-muted">
-                                        {o.payoutStatus || "—"}
+                                        {o.status === "Failed"
+                                          ? `${o.retryCount ?? 0} of ${RETRY_CAP}`
+                                          : "—"}
                                       </td>
                                       <td className="px-3.5 py-2 text-text-muted">
                                         {o.collectedOn || "—"}
