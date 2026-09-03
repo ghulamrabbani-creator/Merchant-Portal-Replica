@@ -22,6 +22,14 @@ const colorMap: Record<string, string> = {
   Failed: "bg-status-declined",
   Success: "bg-status-completed",
   "Max Order Reached": "bg-status-completed",
+  // Added Sep 2026 for Direct Debit occurrences skipped during a subscription pause. This is a
+  // settled, terminal state (not an active wait like the orange Pending/Processing dots), so I
+  // mapped it to the same neutral tone as Submitted/Created rather than a new "bg-status-skipped"
+  // token — that token doesn't exist in tailwind.config here, and an undefined utility class
+  // would silently render with no color at all. If you'd rather Skipped read visually distinct
+  // from Submitted/Created, that needs a new color added to the Tailwind config first — happy to
+  // wire it up once that token exists.
+  Skipped: "bg-status-submitted",
 };
 
 export default function StatusDot({ status }: { status: string }) {
