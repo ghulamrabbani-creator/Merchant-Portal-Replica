@@ -11,10 +11,11 @@ import {
   Landmark,
   CreditCard,
   RotateCw,
+  Undo2,
 } from "lucide-react";
 import clsx from "clsx";
 import { directDebitContracts } from "@/lib/mock-data";
-import { formatMoneyAED, RETRY_CAP } from "@/lib/direct-debit";
+import { formatMoneyAED, RETRY_CAP, canRolloverOccurrence, canUndoRollover, rolloverStreakUsed } from "@/lib/direct-debit";
 import StatCard from "@/components/ui/StatCard";
 import StatusDot from "@/components/ui/StatusDot";
 import Modal from "@/components/ui/Modal";
@@ -46,11 +47,11 @@ export default function ContractDetailPage({
   const { id } = use(params);
   const found = directDebitContracts.find((x) => x.id === id);
 
-  // Local, in-memory copy so Pause/Resume/Retry can update the view without mutating the
-  // shared mock-data module. Not persisted — see README note in the wireframe package this
-  // screen was built from (Notes/Projects/Direct Debit.md, Contract Detail screen section).
-  // Hooks must run unconditionally, ahead of the not-found check below, so they fall back to
-  // safe defaults when `found` is undefined.
+  // Local, in-memory copy so Pause/Resume/Retry/Rollover/Undo rollover can update the view
+  // without mutating the shared mock-data module. Not persisted — see README note in the
+  // wireframe package this screen was built from (Notes/Projects/Direct Debit.md, Contract
+  // Detail screen section). Hooks must run unconditionally, ahead of the not-found check below,
+  // so they fall back to safe defaults when `found` is undefined.
   const [subscriptionStatus, setSubscriptionStatus] = useState(found?.subscriptionStatus ?? "Active");
   const [occurrences, setOccurrences] = useState<DirectDebitOccurrence[]>(found?.occurrences ?? []);
   const [pauseModalOpen, setPauseModalOpen] = useState(false);
@@ -68,6 +69,15 @@ export default function ContractDetailPage({
     const last = [...paid, ...failed].sort((a, b) => a.seq - b.seq).pop();
     return { paid, failed, scheduled, collected, outstanding, next, last };
   }, [occurrences]);
+
+  // Live, derived remaining-in-the-current-run figure — reflects the consecutive/reset rule
+  // (see canRolloverOccurrence), not the static `rolloverRemaining` snapshot in mock data, so it
+  // updates immediately if a Rollover/Undo rollover click above changes what's currently stacked.
+  const liveRolloverRemaining = useMemo(() => {
+    if (!found) return 0;
+    const used = rolloverStreakUsed(occurrences, occurrences.length + 1);
+    return Math.max(0, found.rolloversAllowed - used);
+  }, [occurrences, found]);
 
   if (!found) return notFound();
   const c = found;
@@ -87,6 +97,133 @@ export default function ContractDetailPage({
         };
       })
     );
+  }
+
+  // Manual rollover for a Skipped occurrence (see Notes/Projects/Direct Debit.md — "Skipped
+  // (Paused)" occurrence status). Unlike the automatic Failed-occurrence rollover, this is a
+  // merchant choice: pressing the button sets THIS occurrence's `rolledOver` flag to
+  // "rolled_over" (its own `status` stays "Skipped" — status and rolledOver are independent
+  // fields, see the DDRolloverState comment in lib/types.ts) and folds its amount onto the next
+  // occurrence. The button then flips to "Undo rollover" on this same row.
+  function handleRollover(seq: number) {
+    setOccurrences((prev) => {
+      const eligibility = canRolloverOccurrence(c, prev, seq);
+      if (!eligibility.allowed) return prev;
+      const idx = prev.findIndex((o) => o.seq === seq);
+      const destIdx = prev.findIndex((o) => o.seq === seq + 1);
+      if (idx === -1 || destIdx === -1) return prev;
+      const source = prev[idx];
+      const dest = prev[destIdx];
+      const next = [...prev];
+      next[idx] = { ...source, rolledOver: "rolled_over" };
+      next[destIdx] = {
+        ...dest,
+        amount: dest.amount + source.amount,
+        rolledOverFrom: source.seq,
+        note: `Includes ${formatMoneyAED(source.amount)} carried over from ${source.dueDate} (occurrence #${source.seq}).`,
+      };
+      return next;
+    });
+  }
+
+  // Reverses handleRollover — for the "I didn't mean to press that" case. Only enabled while
+  // the destination occurrence hasn't itself been submitted (see canUndoRollover).
+  function handleUndoRollover(seq: number) {
+    setOccurrences((prev) => {
+      if (!canUndoRollover(prev, seq)) return prev;
+      const idx = prev.findIndex((o) => o.seq === seq);
+      if (idx === -1) return prev;
+      const source = prev[idx];
+      const destIdx = prev.findIndex((o) => o.rolledOverFrom === source.seq);
+      if (destIdx === -1) return prev;
+      const dest = prev[destIdx];
+      const next = [...prev];
+      next[idx] = { ...source, rolledOver: "none" };
+      next[destIdx] = { ...dest, amount: dest.amount - source.amount, rolledOverFrom: undefined, note: undefined };
+      return next;
+    });
+  }
+
+  function renderRolledOver(o: DirectDebitOccurrence) {
+    if (o.rolledOver === "rolled_over") return "Yes";
+    if (o.rolledOver === "blocked_by_ceiling") return "Blocked";
+    if (o.rolledOver === "exhausted") return "Exhausted";
+    if (!c.rolloverEnabled) return "Not Available";
+    return "—";
+  }
+
+  // Actions column: dynamic per occurrence — Retry for a Failed row, Rollover / Undo rollover
+  // for a Skipped row, nothing for anything else. Renamed from "Retry" so both actions can share
+  // the one column rather than fighting over it.
+  function renderActions(o: DirectDebitOccurrence) {
+    if (o.status === "Failed") {
+      const retryCount = o.retryCount ?? 0;
+      const canRetry = retryCount < RETRY_CAP;
+      return (
+        <button
+          onClick={() => canRetry && handleRetry(o.seq)}
+          disabled={!canRetry}
+          className={clsx(
+            "rounded-md border px-2.5 py-1 text-xs font-medium",
+            canRetry
+              ? "border-brand-blue text-brand-blue hover:bg-brand-blue/5"
+              : "border-border-color text-text-muted cursor-not-allowed"
+          )}
+        >
+          Retry {`(${retryCount} of ${RETRY_CAP})`}
+        </button>
+      );
+    }
+
+    if (o.status === "Skipped") {
+      if (o.rolledOver === "rolled_over") {
+        const canUndo = canUndoRollover(occurrences, o.seq);
+        return (
+          <button
+            onClick={() => canUndo && handleUndoRollover(o.seq)}
+            disabled={!canUndo}
+            title={canUndo ? undefined : "Locked — the occurrence it rolled onto has already been processed."}
+            className={clsx(
+              "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium",
+              canUndo
+                ? "border-status-declined text-status-declined hover:bg-status-declined/5"
+                : "border-border-color text-text-muted cursor-not-allowed"
+            )}
+          >
+            <Undo2 size={12} />
+            Undo rollover
+          </button>
+        );
+      }
+
+      const eligibility = canRolloverOccurrence(c, occurrences, o.seq);
+      return (
+        <button
+          onClick={() => eligibility.allowed && handleRollover(o.seq)}
+          disabled={!eligibility.allowed}
+          title={
+            eligibility.reason === "exhausted"
+              ? `No rollover left — ${c.rolloversAllowed} of ${c.rolloversAllowed} already used in this run.`
+              : eligibility.reason === "blocked_by_ceiling"
+                ? "Rolling this forward would exceed the contract's max amount ceiling."
+                : eligibility.reason === "no_future_occurrence"
+                  ? "No future occurrence to roll this onto."
+                  : undefined
+          }
+          className={clsx(
+            "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium",
+            eligibility.allowed
+              ? "border-brand-blue text-brand-blue hover:bg-brand-blue/5"
+              : "border-border-color text-text-muted cursor-not-allowed"
+          )}
+        >
+          <RotateCw size={12} />
+          Rollover
+        </button>
+      );
+    }
+
+    return null;
   }
 
   return (
@@ -222,7 +359,7 @@ export default function ContractDetailPage({
               c.rolloverEnabled ? (
                 <span className="inline-flex items-center gap-1.5">
                   <RotateCw size={13} strokeWidth={2} />
-                  Enabled — {c.rolloversAllowed} allowed, {c.rolloverRemaining} remaining
+                  Enabled — up to {c.rolloversAllowed} consecutive, {liveRolloverRemaining} left in the current run (resets to {c.rolloversAllowed} after any occurrence is collected in full)
                 </span>
               ) : (
                 "Disabled"
@@ -246,59 +383,39 @@ export default function ContractDetailPage({
                   <th className="px-3.5 py-2 font-medium">Rolled Over</th>
                   <th className="px-3.5 py-2 font-medium">Payout Status</th>
                   <th className="px-3.5 py-2 font-medium">Collected On</th>
-                  <th className="px-3.5 py-2 font-medium">Retry</th>
+                  <th className="px-3.5 py-2 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white">
-                {occurrences.map((o) => {
-                  const retryCount = o.retryCount ?? 0;
-                  const canRetry = o.status === "Failed" && retryCount < RETRY_CAP;
-                  return (
-                    <tr key={o.seq} className="border-t border-border-color align-top">
-                      <td className="px-3.5 py-2 text-text-muted">{o.seq}</td>
-                      <td className="px-3.5 py-2 text-text-primary">{o.dueDate}</td>
-                      <td className="px-3.5 py-2 font-semibold text-text-primary">
-                        {formatMoneyAED(o.amount)}
-                        {o.rolledOverFrom && (
-                          <div className="text-[11px] font-normal text-text-muted">
-                            incl. rollover from #{o.rolledOverFrom}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3.5 py-2">
-                        <StatusDot status={o.status} />
-                        {o.note && (
-                          <div className="mt-0.5 max-w-[260px] text-[11px] text-text-muted">{o.note}</div>
-                        )}
-                      </td>
-                      <td className="px-3.5 py-2 text-text-muted">
-                        {o.rolledOver === "rolled_over"
-                          ? "Yes"
-                          : o.rolledOver === "blocked_by_ceiling"
-                            ? "Blocked"
-                            : !c.rolloverEnabled
-                              ? "Not Available"
-                              : "—"}
-                      </td>
-                      <td className="px-3.5 py-2 text-text-muted">{o.payoutStatus || "—"}</td>
-                      <td className="px-3.5 py-2 text-text-muted">{o.collectedOn || "—"}</td>
-                      <td className="px-3.5 py-2">
-                        <button
-                          onClick={() => canRetry && handleRetry(o.seq)}
-                          disabled={!canRetry}
-                          className={clsx(
-                            "rounded-md border px-2.5 py-1 text-xs font-medium",
-                            canRetry
-                              ? "border-brand-blue text-brand-blue hover:bg-brand-blue/5"
-                              : "border-border-color text-text-muted cursor-not-allowed"
-                          )}
-                        >
-                          Retry {o.status === "Failed" ? `(${retryCount} of ${RETRY_CAP})` : ""}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {occurrences.map((o) => (
+                  <tr key={o.seq} className="border-t border-border-color align-top">
+                    <td className="px-3.5 py-2 text-text-muted">{o.seq}</td>
+                    <td className="px-3.5 py-2 text-text-primary">{o.dueDate}</td>
+                    <td className="px-3.5 py-2 font-semibold text-text-primary">
+                      {formatMoneyAED(o.amount)}
+                      {o.rolledOverFrom && (
+                        <div className="text-[11px] font-normal text-text-muted">
+                          incl. rollover from #{o.rolledOverFrom}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3.5 py-2">
+                      <StatusDot status={o.status} />
+                      {o.status === "Skipped" && subscriptionStatus === "Paused" && (
+                        <div className="mt-0.5 max-w-[260px] text-[11px] text-text-muted">
+                          Subscription paused — not submitted for collection.
+                        </div>
+                      )}
+                      {o.note && (
+                        <div className="mt-0.5 max-w-[260px] text-[11px] text-text-muted">{o.note}</div>
+                      )}
+                    </td>
+                    <td className="px-3.5 py-2 text-text-muted">{renderRolledOver(o)}</td>
+                    <td className="px-3.5 py-2 text-text-muted">{o.payoutStatus || "—"}</td>
+                    <td className="px-3.5 py-2 text-text-muted">{o.collectedOn || "—"}</td>
+                    <td className="px-3.5 py-2">{renderActions(o)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
