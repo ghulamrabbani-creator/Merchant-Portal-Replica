@@ -449,9 +449,10 @@ export const bulkUploads: BulkUpload[] = [
 // doesn't match the contract's own term"). `genOccurrences` takes the ISO anchor date each
 // contract's occurrences actually start from plus an explicit count — the count is chosen per
 // contract below to match that contract's own stated period, not hardcoded to a year across
-// the board (dd1: 6mo/6, dd2: ~1yr/12, dd4: 4mo/4, dd5: 2yr/24, dd7: ~1yr/12). The one legitimate
-// exception is a Cancelled contract (dd8): cancellation stops the schedule early, so its
-// occurrence count reflects the contract's actual life, not its original nominal term.
+// the board (dd1: 6mo/6, dd2: ~1yr/12, dd4: 4mo/4, dd5: 2yr/24, dd7: ~1yr/12, dd9: 8mo/8,
+// dd10: 6mo/6). The one legitimate exception is a Cancelled contract (dd8): cancellation stops
+// the schedule early, so its occurrence count reflects the contract's actual life, not its
+// original nominal term.
 function genOccurrences(
   isoStart: string,
   frequency: DDFrequency,
@@ -610,11 +611,11 @@ export const directDebitContracts: DirectDebitContract[] = [
     rolloverRemaining: 1,
     status: "Active",
     subscriptionStatus: "Paused",
-    pausedNote: "Subscription paused on 15 Aug 2026 — mandate remains Active. Occurrences due after the pause are not included in payment file submission.",
+    pausedNote: "Subscription paused on 15 Aug 2026 — mandate remains Active. Occurrence #3 came due during the pause and was marked Skipped; use Rollover on that row to fold its amount onto #4 instead of writing it off.",
     occurrences: genOccurrences("2026-07-10", "Monthly", 24, 5000, {
       1: { status: "Paid", rolledOver: "none", collectedOn: "10 Jul 2026", payoutStatus: "Settled" },
       2: { status: "Paid", rolledOver: "none", collectedOn: "10 Aug 2026", payoutStatus: "Settled" },
-      3: { note: "Subscription paused — not included in payment file" },
+      3: { status: "Skipped", rolledOver: "none" },
     }),
   },
   {
@@ -707,5 +708,81 @@ export const directDebitContracts: DirectDebitContract[] = [
       3: { status: "Paid", rolledOver: "none", collectedOn: "05 Jun 2026", payoutStatus: "Settled" },
     }),
     cancelledNote: "Contract cancelled on 20 Jun 2026 — no further collections.",
+  },
+  // dd9 — new (Sep 2026): rollover allowance is a CONSECUTIVE-streak cap, not a lifetime one.
+  // #2 rolls onto #3 (streak 1 of 2), #3 fails too and rolls onto #4 (streak 2 of 2 — now
+  // exhausted), #4 fails but CANNOT roll any further (rolledOver: "exhausted") and is written off
+  // per the existing failure-handling design (proof-of-failure, no further rollover). #5 collects
+  // cleanly, which resets the streak, so #6 is free to roll onto #7 again even though the
+  // contract's lifetime rollover count is well past 2 by then.
+  {
+    id: "dd9",
+    ref: "DD-2026-00091",
+    merchantRef: "INV-2026-05877",
+    notes: "Equipment lease — consecutive-failure / rollover-exhaustion scenario",
+    createdOn: "12 Feb 2026, 10:40 AM",
+    customerName: "Hassan Zaidi",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1987-9012345-9",
+    instrumentType: "Bank Account",
+    bankName: "RAK Bank",
+    maskedInstrumentRef: "•••7420",
+    commencesOn: "15 Feb 2026",
+    expiresOn: "15 Oct 2026", // 8 monthly occurrences
+    frequency: "Monthly",
+    amountType: "Variable",
+    minAmount: 3000,
+    maxAmount: 20000, // sized generously so the ceiling itself never blocks this scenario — it's about the streak cap, not the amount cap
+    rolloverEnabled: true,
+    rolloversAllowed: 2,
+    rolloverRemaining: 0, // snapshot as of the last occurrence below — see canRolloverOccurrence for the live, derived figure
+    status: "Active",
+    subscriptionStatus: "Active",
+    occurrences: genOccurrences("2026-02-15", "Monthly", 8, 3000, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: "15 Feb 2026", payoutStatus: "Settled" },
+      2: { status: "Failed", rolledOver: "rolled_over", retryCount: 3, payoutStatus: "—", note: "3 of 3 retries exhausted — amount rolled onto the next occurrence (1 of 2 rollovers used)" },
+      3: { status: "Failed", amount: 6000, rolledOverFrom: 2, rolledOver: "rolled_over", retryCount: 3, payoutStatus: "—", note: "Includes AED 3,000.00 carried from #2. 3 of 3 retries exhausted — amount rolled onto the next occurrence (2 of 2 rollovers used)" },
+      4: { status: "Failed", amount: 9000, rolledOverFrom: 3, rolledOver: "exhausted", retryCount: 3, payoutStatus: "—", note: "Includes AED 6,000.00 carried from #3. 3 of 3 retries exhausted — no rollover left (2 of 2 already used in this run); proof-of-failure document generated." },
+      5: { status: "Paid", rolledOver: "none", collectedOn: "15 Jun 2026", payoutStatus: "Settled", note: "Collected in full — this resets the rollover streak for anything that fails after it." },
+      6: { status: "Failed", rolledOver: "rolled_over", retryCount: 3, payoutStatus: "—", note: "3 of 3 retries exhausted — amount rolled onto the next occurrence (fresh allowance: the streak reset after #5 was paid in full)" },
+      7: { status: "Paid", amount: 6000, rolledOverFrom: 6, collectedOn: "15 Aug 2026", payoutStatus: "Settled", note: "Includes AED 3,000.00 recovered from 15 Jul 2026 (occurrence #6)" },
+      8: { status: "Scheduled" },
+    }),
+  },
+  // dd10 — new (Sep 2026): Skipped-during-pause occurrences, one still awaiting the merchant's
+  // Rollover/Undo rollover decision (#2) and one where the merchant already pressed Rollover
+  // (#4, folded onto #5) — so both button states are represented on the same contract.
+  {
+    id: "dd10",
+    ref: "DD-2026-00085",
+    merchantRef: "INV-2026-05412",
+    notes: "Community charges — paused mid-term, two occurrences skipped",
+    createdOn: "02 Jan 2026, 03:50 PM",
+    customerName: "Mona Kassem",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1993-0123456-0",
+    instrumentType: "Bank Account",
+    bankName: "Sharjah Islamic Bank",
+    maskedInstrumentRef: "•••3308",
+    commencesOn: "10 Jan 2026",
+    expiresOn: "10 Jul 2026", // 6 monthly occurrences
+    frequency: "Monthly",
+    amountType: "Variable",
+    minAmount: 4000,
+    maxAmount: 12000,
+    rolloverEnabled: true,
+    rolloversAllowed: 2,
+    rolloverRemaining: 1,
+    status: "Active",
+    subscriptionStatus: "Paused",
+    pausedNote: "Subscription paused on 08 Mar 2026 — mandate remains Active. #2 and #4 both came due during the pause: #2 is still awaiting a Rollover decision, #4 has already been rolled onto #5.",
+    occurrences: genOccurrences("2026-01-10", "Monthly", 6, 4000, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: "10 Jan 2026", payoutStatus: "Settled" },
+      2: { status: "Skipped", rolledOver: "none" },
+      3: { status: "Skipped", rolledOver: "none" },
+      4: { status: "Skipped", rolledOver: "rolled_over", note: "Merchant rolled this amount onto #5." },
+      5: { status: "Scheduled", amount: 8000, rolledOverFrom: 4, note: "Includes AED 4,000.00 carried over from 10 Apr 2026 (occurrence #4)." },
+      6: { status: "Scheduled" },
+    }),
   },
 ];
