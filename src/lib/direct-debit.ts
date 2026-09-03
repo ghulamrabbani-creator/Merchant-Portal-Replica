@@ -17,6 +17,10 @@ export const FREQ_MONTHS: Record<DDFrequency, number> = {
 
 export { DD_FREQUENCIES };
 
+// Max Payment Representment attempts per Order Model (Payment.retry_count), mirroring
+// UAE cheque-bounce rules: original attempt + up to 3 retries = 4 total attempts.
+export const RETRY_CAP = 3;
+
 export function parseDateStr(str: string): Date {
   if (!str) return new Date();
   const [y, m, d] = str.split("-").map((p) => parseInt(p, 10));
