@@ -1,4 +1,4 @@
-import { DD_FREQUENCIES, DDAmountType, DDFrequency, DirectDebitContract, DirectDebitOccurrence } from "./types";
+import { DD_FREQUENCIES, DDAmountType, DDFrequency, DDSubscriptionStatus, DirectDebitContract, DirectDebitOccurrence } from "./types";
 
 // Ported from the Direct Debit Contracts design canvas (Create Contracts & Subscription flow).
 // Central Bank rule: no more than one collection per the mandate's own payment_frequency period —
@@ -163,35 +163,86 @@ export function rolloverStreakUsed(occurrences: DirectDebitOccurrence[], beforeS
   return used;
 }
 
-export type RolloverBlockedReason = "exhausted" | "blocked_by_ceiling" | "no_future_occurrence" | "rollover_disabled";
+export type RolloverBlockedReason =
+  | "exhausted"
+  | "blocked_by_ceiling"
+  | "no_future_occurrence"
+  | "rollover_disabled"
+  | "subscription_paused";
 
 export interface RolloverEligibility {
   allowed: boolean;
   reason?: RolloverBlockedReason;
 }
 
-/** Whether the occurrence at `seq` can have its amount rolled onto the next occurrence right
- *  now — used both for the automatic Failed-occurrence path and the manual Skipped-occurrence
- *  Rollover button. Checks, in order: a future occurrence exists to receive it; rollover is
- *  enabled on the contract at all; the current consecutive streak hasn't used up
- *  `rolloversAllowed`; and folding the amount forward wouldn't push the destination past
- *  `maxAmount`. */
-export function canRolloverOccurrence(
-  contract: Pick<DirectDebitContract, "rolloverEnabled" | "rolloversAllowed" | "maxAmount">,
+export interface RolloverDestinationOption {
+  seq: number;
+  dueDate: string;
+  resultingAmount: number;
+  wouldBreachCeiling: boolean;
+}
+
+/** Every upcoming occurrence `seq` COULD roll onto right now, in schedule order, each flagged
+ *  with whether picking it would push its amount past `maxAmount`. Only `Scheduled` occurrences
+ *  qualify as a destination — a Skipped or Failed occurrence isn't collectible either, so folding
+ *  onto one of those would just recreate the laddering problem this exists to avoid (merchant
+ *  feedback, reference contract DD-2026-00085: hardcoding the destination to `seq + 1` meant a
+ *  Skipped occurrence often rolled onto another Skipped occurrence, chaining through several
+ *  months and hitting `maxAmount` before reaching anything collectible). See Direct Debit.md,
+ *  "Skipped occurrences & manual rollover." */
+export function rolloverDestinationOptions(
+  contract: Pick<DirectDebitContract, "maxAmount">,
   occurrences: DirectDebitOccurrence[],
   seq: number
-): RolloverEligibility {
+): RolloverDestinationOption[] {
   const source = occurrences.find((o) => o.seq === seq);
-  const dest = occurrences.find((o) => o.seq === seq + 1);
-  if (!source || !dest) return { allowed: false, reason: "no_future_occurrence" };
+  if (!source) return [];
+  return occurrences
+    .filter((o) => o.seq > seq && o.status === "Scheduled")
+    .sort((a, b) => a.seq - b.seq)
+    .map((dest) => ({
+      seq: dest.seq,
+      dueDate: dest.dueDate,
+      resultingAmount: dest.amount + source.amount,
+      wouldBreachCeiling: dest.amount + source.amount > contract.maxAmount,
+    }));
+}
+
+/** Whether the occurrence at `seq` can be rolled over right now — used both for the automatic
+ *  Failed-occurrence path and the manual Skipped-occurrence Rollover button. Checks, in order:
+ *  rollover is enabled on the contract at all; the subscription isn't currently Paused (rolling
+ *  onto an occurrence while still paused risks folding onto one that itself gets marked Skipped
+ *  before the merchant Resumes — the merchant should pick a destination only once the schedule is
+ *  live again); the current consecutive streak hasn't used up `rolloversAllowed`; and at least
+ *  one upcoming `Scheduled` occurrence exists that wouldn't breach `maxAmount`.
+ *
+ *  Pass `destSeq` to validate one SPECIFIC chosen destination (from `rolloverDestinationOptions`)
+ *  instead of asking "does any valid destination exist" — this is the guard `handleRollover`
+ *  re-runs right before committing, since the merchant picks the destination from a dropdown. */
+export function canRolloverOccurrence(
+  contract: Pick<DirectDebitContract, "rolloverEnabled" | "rolloversAllowed" | "maxAmount">,
+  subscriptionStatus: DDSubscriptionStatus,
+  occurrences: DirectDebitOccurrence[],
+  seq: number,
+  destSeq?: number
+): RolloverEligibility {
   if (!contract.rolloverEnabled) return { allowed: false, reason: "rollover_disabled" };
+  if (subscriptionStatus === "Paused") return { allowed: false, reason: "subscription_paused" };
 
   const used = rolloverStreakUsed(occurrences, seq);
   if (used >= contract.rolloversAllowed) return { allowed: false, reason: "exhausted" };
 
-  if (dest.amount + source.amount > contract.maxAmount) {
-    return { allowed: false, reason: "blocked_by_ceiling" };
+  const options = rolloverDestinationOptions(contract, occurrences, seq);
+  if (options.length === 0) return { allowed: false, reason: "no_future_occurrence" };
+
+  if (destSeq != null) {
+    const chosen = options.find((o) => o.seq === destSeq);
+    if (!chosen) return { allowed: false, reason: "no_future_occurrence" };
+    if (chosen.wouldBreachCeiling) return { allowed: false, reason: "blocked_by_ceiling" };
+    return { allowed: true };
   }
+
+  if (options.every((o) => o.wouldBreachCeiling)) return { allowed: false, reason: "blocked_by_ceiling" };
   return { allowed: true };
 }
 
@@ -202,7 +253,12 @@ export function canRolloverOccurrence(
  *  — a Skipped destination just means the pause is still going and the combined amount hasn't
  *  had a chance to be collected yet, which is exactly the case a rollover chain (one Skipped
  *  occurrence rolling onto the next) produces. Only Paid/Failed means it was actually
- *  submitted, which is when it locks. */
+ *  submitted, which is when it locks.
+ *
+ *  Deliberately independent of `Subscription.status`: unlike initiating a new rollover (blocked
+ *  while Paused, see `canRolloverOccurrence`), undoing one just reverses the merchant's own prior
+ *  choice and doesn't depend on the schedule being live — so Undo stays available even while the
+ *  subscription is Paused. */
 export function canUndoRollover(occurrences: DirectDebitOccurrence[], seq: number): boolean {
   const dest = occurrences.find((o) => o.rolledOverFrom === seq);
   if (!dest) return false;
