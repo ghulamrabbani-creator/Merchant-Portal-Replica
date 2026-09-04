@@ -271,3 +271,35 @@ export function canUndoRollover(occurrences: DirectDebitOccurrence[], seq: numbe
   if (!dest) return false;
   return dest.status === "Scheduled" || dest.status === "Skipped";
 }
+
+// ---- New-contract helpers (added Sep 2026 — real Create & Send Contract flow) ----
+
+/** Next sequential contract reference, one higher than the highest existing `DD-YYYY-#####`
+ *  ref in the current year — mirrors the numbering already used across `dd1`-`dd10` in
+ *  mock-data.ts (descending by recency, e.g. DD-2026-00142 is the most recent). */
+export function nextContractRef(existing: { ref: string }[]): string {
+  const year = new Date().getFullYear();
+  const maxNum = existing.reduce((max, c) => {
+    const m = c.ref.match(/DD-\d{4}-(\d+)/);
+    const n = m ? parseInt(m[1], 10) : 0;
+    return Math.max(max, n);
+  }, 0);
+  return `DD-${year}-${String(maxNum + 1).padStart(5, "0")}`;
+}
+
+/** Masks a raw IBAN or card number down to its last 4 digits, matching the "•••1095" style
+ *  already used throughout mock-data.ts's `maskedInstrumentRef`. */
+export function maskInstrumentRef(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  const last4 = digits.slice(-4) || "0000";
+  return `•••${last4}`;
+}
+
+/** "createdOn" timestamp in the same "28 Aug 2026, 10:15 AM" format used throughout mock data. */
+export function formatCreatedOn(d: Date): string {
+  let hours = d.getHours();
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+  return `${formatDateNice(d)}, ${String(hours).padStart(2, "0")}:${minutes} ${ampm}`;
+}
