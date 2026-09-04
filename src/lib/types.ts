@@ -250,8 +250,16 @@ export interface DirectDebitOccurrence {
   amount: number;
   status: DDOccurrenceStatus;
   rolledOver: DDRolloverState;
-  /** Set on the destination occurrence only: seq of the occurrence whose amount rolled in here. */
-  rolledOverFrom?: number;
+  /** Set on the destination occurrence only: seq(s) of the occurrence(s) whose amount rolled in
+   *  here. An ARRAY (changed Sep 2026) — once the merchant can choose any upcoming Scheduled
+   *  occurrence as a rollover destination (see canRolloverOccurrence in lib/direct-debit.ts),
+   *  more than one Skipped/Failed occurrence can land on the SAME destination (e.g. two
+   *  consecutive Skipped occurrences both rolled onto the next real collection date). A single
+   *  `number` couldn't represent that — rolling a second source into an already-received-into
+   *  destination silently overwrote the first source's reference, which also broke Undo for that
+   *  first source (canUndoRollover looks up the destination by matching seq inside this array).
+   *  Bug found by Rabbani testing DD-2026-00085, Sep 2026. */
+  rolledOverFrom?: number[];
   /** Times Payment Representment has been called for this occurrence, capped at 3 (see Order Model `Payment.retry_count`). Not applicable to Skipped occurrences — nothing was ever submitted, so there's nothing to retry. */
   retryCount?: number;
   payoutStatus?: string; // "Settled" | "Pending settlement" | "—" — Order Model has no dedicated field yet, backend/APEX-derived
@@ -264,6 +272,12 @@ export interface DirectDebitContract {
   ref: string; // DDS mandate reference shown to the merchant, e.g. DD-2026-00142
   merchantRef: string; // dda_reference_number — merchant-typed, see Order Model
   notes?: string; // Mandate.notes — merchant-only, never shown to the customer
+  /** Mandate.contract_description (added Sep 2026) — a short, plain-language description of
+   *  what the contract is for, captured alongside the merchant reference at contract creation.
+   *  Distinct from `notes`: this one IS shown to the customer, on the contract review & sign
+   *  page, since the only context they otherwise get is the merchant name and a meaningless
+   *  numeric contract reference. See Notes/Projects/Direct Debit.md. */
+  contractDescription?: string;
   createdOn: string; // "28 Aug 2026, 10:15 AM"
   customerName: string;
   customerIdType: string; // e.g. "Emirates ID"
