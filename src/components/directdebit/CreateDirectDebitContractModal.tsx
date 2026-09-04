@@ -1,20 +1,25 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { X, ChevronDown, Check, AlertCircle, Pencil } from "lucide-react";
 import clsx from "clsx";
 import {
   DD_FREQUENCIES,
   buildOccurrenceSchedule,
   collectionFrequencyOptions,
+  formatCreatedOn,
   formatDateNice,
   formatMoneyAED,
+  maskInstrumentRef,
   minGapDays,
+  nextContractRef,
   OccurrenceOverride,
   parseDateStr,
   toDateInputValue,
 } from "@/lib/direct-debit";
-import { DDAmountType, DDFrequency, DDInstrumentType, DDS_BANKS } from "@/lib/types";
+import { DDAmountType, DDFrequency, DDInstrumentType, DDS_BANKS, DirectDebitContract, DirectDebitOccurrence } from "@/lib/types";
+import { directDebitContracts } from "@/lib/mock-data";
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -32,6 +37,8 @@ export default function CreateDirectDebitContractModal({
   open: boolean;
   onClose: () => void;
 }) {
+  const router = useRouter();
+
   const [step, setStep] = useState<Step>(1);
   const [maxStepReached, setMaxStepReached] = useState<Step>(1);
 
@@ -39,6 +46,22 @@ export default function CreateDirectDebitContractModal({
   const [amountType, setAmountType] = useState<DDAmountType>("Variable");
   const [frequencyCeiling, setFrequencyCeiling] = useState<DDFrequency>("Monthly");
   const [collectionFrequency, setCollectionFrequency] = useState<DDFrequency>("Monthly");
+
+  // Customer & Mandate — Step 1 identity/instrument fields (made controlled Sep 2026 so this
+  // data is actually captured and can be carried forward to the Contract Review & Sign page,
+  // rather than sitting in uncontrolled `defaultValue` inputs that were never read anywhere).
+  const [customerName, setCustomerName] = useState("Sara Ibrahim");
+  const [customerEmail, setCustomerEmail] = useState("sara.ibrahim@example.com");
+  const [customerMobile, setCustomerMobile] = useState("0501234567");
+  const [customerIdNumber, setCustomerIdNumber] = useState("784-1990-1234567-1");
+
+  const [bankName, setBankName] = useState<string>("Emiratesnbd Bank PJSC");
+  const [accountHolderTitle, setAccountHolderTitle] = useState("Sara Ibrahim");
+  const [iban, setIban] = useState("AE07 0331 2345 6789 0123 456");
+
+  const [cardHolderName, setCardHolderName] = useState("Sara Ibrahim");
+  const [issuingBank, setIssuingBank] = useState<string>("Emiratesnbd Bank PJSC");
+  const [cardNumber, setCardNumber] = useState("4242 4242 4242 4242");
 
   const [merchantRef, setMerchantRef] = useState("INV-2026-08421");
   // Customer-facing (Mandate.contract_description, added Sep 2026) — distinct from Notes below,
@@ -58,6 +81,7 @@ export default function CreateDirectDebitContractModal({
   const [rolloverEnabled, setRolloverEnabled] = useState(true);
   const [rolloversAllowed, setRolloversAllowed] = useState(2);
   const [installment, setInstallment] = useState(4000);
+  const [minAmount, setMinAmount] = useState(4000);
   const [maxAmount, setMaxAmount] = useState(20000);
 
   const [editingSeq, setEditingSeq] = useState<number | null>(null);
@@ -168,6 +192,53 @@ export default function CreateDirectDebitContractModal({
   const showNotesInPanel = !!notes.trim();
   const showDescriptionInPanel = !!contractDescription.trim();
 
+  // Builds the full contract from everything captured across all 4 steps and hands it off to the
+  // Contract Review & Sign page — see Notes/Projects/Direct Debit.md: all data captured within the
+  // creation flow must carry forward to signing, not just the fields already wired to state.
+  // No backend/global store exists yet, so — matching every other mutation in this prototype
+  // (Pause/Resume/Retry/Rollover) — the shared `directDebitContracts` mock array is pushed to
+  // directly and read back by id on the next page; it resets on a full reload, same as those.
+  const handleCreateAndSend = () => {
+    const id = `dd${Date.now()}`;
+    const occurrences: DirectDebitOccurrence[] = built.list.map((o) => ({
+      seq: o.seq,
+      dueDate: formatDateNice(o.date),
+      amount: o.amount,
+      status: "Scheduled",
+      rolledOver: "none",
+    }));
+    const newContract: DirectDebitContract = {
+      id,
+      ref: nextContractRef(directDebitContracts),
+      merchantRef,
+      notes: notes.trim() || undefined,
+      contractDescription: contractDescription.trim() || undefined,
+      createdOn: formatCreatedOn(new Date()),
+      customerName,
+      customerIdType: "Emirates ID",
+      customerIdNumber,
+      instrumentType,
+      bankName: bankActive ? bankName : issuingBank,
+      maskedInstrumentRef: maskInstrumentRef(bankActive ? iban : cardNumber),
+      commencesOn: formatDateNice(parseDateStr(commencesOn)),
+      expiresOn: formatDateNice(parseDateStr(expiresOn)),
+      frequency: frequencyCeiling,
+      amountType,
+      minAmount,
+      maxAmount,
+      nextDue: occurrences[0] ? { amount: occurrences[0].amount, date: occurrences[0].dueDate } : undefined,
+      rolloverEnabled: effectiveRolloverEnabled,
+      rolloversAllowed,
+      rolloverRemaining: rolloversAllowed,
+      status: "Pending Customer Sign",
+      subscriptionStatus: "Active",
+      occurrences,
+    };
+    directDebitContracts.unshift(newContract);
+    onClose();
+    router.push(`/direct-debit/${id}/sign`);
+  };
+
   const pillActive = "flex-1 rounded-lg py-2.5 text-center text-sm font-semibold bg-brand-orange text-white cursor-pointer";
   const pillInactive = "flex-1 rounded-lg py-2.5 text-center text-sm font-semibold text-text-secondary cursor-pointer";
 
@@ -260,20 +331,36 @@ export default function CreateDirectDebitContractModal({
               <div className="mb-4 grid grid-cols-2 gap-3.5">
                 <div>
                   <Label>Customer full name</Label>
-                  <input defaultValue="Sara Ibrahim" className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none" />
+                  <input
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                  />
                 </div>
                 <div>
                   <Label>Customer email</Label>
-                  <input defaultValue="sara.ibrahim@example.com" className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none" />
+                  <input
+                    value={customerEmail}
+                    onChange={(e) => setCustomerEmail(e.target.value)}
+                    className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                  />
                 </div>
                 <div>
                   <Label>Mobile number</Label>
-                  <input defaultValue="0501234567" className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none" />
+                  <input
+                    value={customerMobile}
+                    onChange={(e) => setCustomerMobile(e.target.value)}
+                    className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                  />
                   <Help>Registered on UAE PASS</Help>
                 </div>
                 <div>
                   <Label>Emirates ID number</Label>
-                  <input defaultValue="784-1990-1234567-1" className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none" />
+                  <input
+                    value={customerIdNumber}
+                    onChange={(e) => setCustomerIdNumber(e.target.value)}
+                    className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                  />
                 </div>
               </div>
 
@@ -292,7 +379,8 @@ export default function CreateDirectDebitContractModal({
                   <div>
                     <Label>Bank name</Label>
                     <select
-                      defaultValue="Emiratesnbd Bank PJSC"
+                      value={bankName}
+                      onChange={(e) => setBankName(e.target.value)}
                       className="w-full rounded-lg border border-border-color bg-white px-3 py-2.5 text-sm outline-none"
                     >
                       {DDS_BANKS.map((bank) => (
@@ -305,23 +393,36 @@ export default function CreateDirectDebitContractModal({
                   </div>
                   <div>
                     <Label>Account holder title</Label>
-                    <input defaultValue="Sara Ibrahim" className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none" />
+                    <input
+                      value={accountHolderTitle}
+                      onChange={(e) => setAccountHolderTitle(e.target.value)}
+                      className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                    />
                   </div>
                   <div className="col-span-2">
                     <Label>IBAN</Label>
-                    <input defaultValue="AE07 0331 2345 6789 0123 456" className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none" />
+                    <input
+                      value={iban}
+                      onChange={(e) => setIban(e.target.value)}
+                      className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                    />
                   </div>
                 </div>
               ) : (
                 <div key="credit-card-fields" className="mb-4 grid grid-cols-2 gap-3.5">
                   <div>
                     <Label>Card holder name</Label>
-                    <input defaultValue="Sara Ibrahim" className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none" />
+                    <input
+                      value={cardHolderName}
+                      onChange={(e) => setCardHolderName(e.target.value)}
+                      className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                    />
                   </div>
                   <div>
                     <Label>Issuing bank</Label>
                     <select
-                      defaultValue="Emiratesnbd Bank PJSC"
+                      value={issuingBank}
+                      onChange={(e) => setIssuingBank(e.target.value)}
                       className="w-full rounded-lg border border-border-color bg-white px-3 py-2.5 text-sm outline-none"
                     >
                       {DDS_BANKS.map((bank) => (
@@ -334,7 +435,11 @@ export default function CreateDirectDebitContractModal({
                   </div>
                   <div className="col-span-2">
                     <Label>Card number</Label>
-                    <input defaultValue="4242 4242 4242 4242" className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none" />
+                    <input
+                      value={cardNumber}
+                      onChange={(e) => setCardNumber(e.target.value)}
+                      className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                    />
                   </div>
                 </div>
               )}
@@ -373,7 +478,12 @@ export default function CreateDirectDebitContractModal({
               <div className="grid grid-cols-3 gap-3.5">
                 <div>
                   <Label>Min amount (AED)</Label>
-                  <input defaultValue="4000" className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none" />
+                  <input
+                    type="number"
+                    value={minAmount}
+                    onChange={(e) => setMinAmount(parseFloat(e.target.value) || 0)}
+                    className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                  />
                 </div>
                 <div>
                   <Label>Max amount (AED)</Label>
@@ -612,7 +722,7 @@ export default function CreateDirectDebitContractModal({
               </p>
 
               <div className="flex flex-col gap-3">
-                <ReviewRow label="Customer" value="Sara Ibrahim · 784-1990-1234567-1" />
+                <ReviewRow label="Customer" value={`${customerName} · ${customerIdNumber}`} />
                 <ReviewRow label="Merchant reference" value={merchantRef} />
                 <ReviewRow
                   label="Contract description"
@@ -620,9 +730,9 @@ export default function CreateDirectDebitContractModal({
                 />
                 <ReviewRow label="Payment instrument" value={instrumentSummary} />
                 {bankActive ? (
-                  <ReviewRow label="IBAN" value="AE07 0331 2345 6789 0123 456" />
+                  <ReviewRow label="IBAN" value={iban} />
                 ) : (
-                  <ReviewRow label="Card number" value="•••• •••• •••• 4242" />
+                  <ReviewRow label="Card number" value={`•••• •••• •••• ${cardNumber.replace(/\D/g, "").slice(-4) || "0000"}`} />
                 )}
                 <ReviewRow label="Validity" value={validityLabel} />
                 <ReviewRow label="Collection type" value={collectionTypeSummary} />
@@ -658,7 +768,7 @@ export default function CreateDirectDebitContractModal({
               <div className="mt-0.5 text-[13px] text-text-muted">Reference assigned after signature</div>
 
               <div className="mt-4 flex flex-col gap-2.5 border-t border-border-color pt-3.5 text-[13px]">
-                <SummaryRow label="Customer" value="Sara Ibrahim" />
+                <SummaryRow label="Customer" value={customerName} />
                 <SummaryRow label="Merchant ref" value={merchantRef} />
                 {showDescriptionInPanel && (
                   <SummaryRow label="Description" value={contractDescription} />
@@ -694,7 +804,7 @@ export default function CreateDirectDebitContractModal({
         </button>
         {step === 4 ? (
           <button
-            onClick={onClose}
+            onClick={handleCreateAndSend}
             disabled={!acknowledged}
             className="rounded-lg bg-brand-blue px-[26px] py-2.5 text-[13.5px] font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
