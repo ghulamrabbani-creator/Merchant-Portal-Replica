@@ -611,7 +611,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     rolloverRemaining: 1,
     status: "Active",
     subscriptionStatus: "Paused",
-    pausedNote: "Subscription paused on 15 Aug 2026 — mandate remains Active. Occurrence #3 came due during the pause and was marked Skipped; use Rollover on that row to fold its amount onto #4 instead of writing it off.",
+    pausedNote: "Subscription paused on 15 Aug 2026 — mandate remains Active. Occurrence #3 came due during the pause and was marked Skipped. Rollover is disabled while the subscription stays paused — Resume first, then use Rollover on that row to fold its amount onto whichever upcoming occurrence you choose, instead of writing it off.",
     occurrences: genOccurrences("2026-07-10", "Monthly", 24, 5000, {
       1: { status: "Paid", rolledOver: "none", collectedOn: "10 Jul 2026", payoutStatus: "Settled" },
       2: { status: "Paid", rolledOver: "none", collectedOn: "10 Aug 2026", payoutStatus: "Settled" },
@@ -775,7 +775,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     rolloverRemaining: 1,
     status: "Active",
     subscriptionStatus: "Paused",
-    pausedNote: "Subscription paused on 08 Mar 2026 — mandate remains Active. #2 and #4 both came due during the pause: #2 is still awaiting a Rollover decision, #4 has already been rolled onto #5.",
+    pausedNote: "Subscription paused on 08 Mar 2026 — mandate remains Active. #2 and #3 both came due during the pause and are Skipped, but Rollover is disabled while paused — Resume first to act on them. Once enabled, the destination dropdown only offers #5 and #6 (the actual Scheduled occurrences) — #3 and #4 are Skipped, so they're correctly excluded rather than laddered through. #4 was already rolled onto #5 before this pause (Undo rollover stays available regardless of pause state).",
     occurrences: genOccurrences("2026-01-10", "Monthly", 6, 4000, {
       1: { status: "Paid", rolledOver: "none", collectedOn: "10 Jan 2026", payoutStatus: "Settled" },
       2: { status: "Skipped", rolledOver: "none" },
