@@ -41,6 +41,11 @@ export default function CreateDirectDebitContractModal({
   const [collectionFrequency, setCollectionFrequency] = useState<DDFrequency>("Monthly");
 
   const [merchantRef, setMerchantRef] = useState("INV-2026-08421");
+  // Customer-facing (Mandate.contract_description, added Sep 2026) — distinct from Notes below,
+  // which stays merchant-only. Shown to the customer on the Contract review & sign page in place
+  // of merchant reference number, which is meaningless to them. See Notes/Projects/Direct
+  // Debit.md, "Mandate details section."
+  const [contractDescription, setContractDescription] = useState("");
   const [notes, setNotes] = useState("");
 
   // Mandate validity window (contract-level)
@@ -161,6 +166,7 @@ export default function CreateDirectDebitContractModal({
   const showRolloverInPanel = maxStepReached >= 2;
   const showFirstCollection = maxStepReached >= 3;
   const showNotesInPanel = !!notes.trim();
+  const showDescriptionInPanel = !!contractDescription.trim();
 
   const pillActive = "flex-1 rounded-lg py-2.5 text-center text-sm font-semibold bg-brand-orange text-white cursor-pointer";
   const pillInactive = "flex-1 rounded-lg py-2.5 text-center text-sm font-semibold text-text-secondary cursor-pointer";
@@ -234,6 +240,21 @@ export default function CreateDirectDebitContractModal({
                   className="w-full max-w-xs rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
                 />
                 <Help>Your own reference for this contract (order/invoice number, etc.)</Help>
+              </div>
+
+              <div className="mb-4">
+                <Label>Contract description</Label>
+                <input
+                  value={contractDescription}
+                  onChange={(e) => setContractDescription(e.target.value)}
+                  placeholder="e.g. Monthly rent collection — Building 12, Unit 304"
+                  maxLength={140}
+                  className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                />
+                <Help>
+                  Shown to the customer on the contract signing page — this is the only context they get
+                  beyond your company name, so make it plain language (not the internal Notes below).
+                </Help>
               </div>
 
               <div className="mb-4 grid grid-cols-2 gap-3.5">
@@ -593,6 +614,10 @@ export default function CreateDirectDebitContractModal({
               <div className="flex flex-col gap-3">
                 <ReviewRow label="Customer" value="Sara Ibrahim · 784-1990-1234567-1" />
                 <ReviewRow label="Merchant reference" value={merchantRef} />
+                <ReviewRow
+                  label="Contract description"
+                  value={contractDescription.trim() || "Not set — customer will only see your company name"}
+                />
                 <ReviewRow label="Payment instrument" value={instrumentSummary} />
                 {bankActive ? (
                   <ReviewRow label="IBAN" value="AE07 0331 2345 6789 0123 456" />
@@ -635,6 +660,9 @@ export default function CreateDirectDebitContractModal({
               <div className="mt-4 flex flex-col gap-2.5 border-t border-border-color pt-3.5 text-[13px]">
                 <SummaryRow label="Customer" value="Sara Ibrahim" />
                 <SummaryRow label="Merchant ref" value={merchantRef} />
+                {showDescriptionInPanel && (
+                  <SummaryRow label="Description" value={contractDescription} />
+                )}
                 <SummaryRow label="Instrument" value={instrumentSummary} />
                 <SummaryRow label="Amount type" value={amountTypeSummary} />
                 <SummaryRow label="Frequency" value={panelFrequency} />
