@@ -86,7 +86,7 @@ export default function ContractDetailPage({
   // updates immediately if a Rollover/Undo rollover click above changes what's currently stacked.
   const liveRolloverRemaining = useMemo(() => {
     if (!found) return 0;
-    const used = rolloverStreakUsed(occurrences, occurrences.length + 1);
+    const used = rolloverStreakUsed(occurrences);
     return Math.max(0, found.rolloversAllowed - used);
   }, [occurrences, found]);
 
@@ -130,11 +130,16 @@ export default function ContractDetailPage({
       const dest = prev[destIdx];
       const next = [...prev];
       next[idx] = { ...source, rolledOver: "rolled_over" };
+      // APPEND to rolledOverFrom rather than overwrite — a destination can now receive more than
+      // one source (bug found by Rabbani testing DD-2026-00085: overwriting a single scalar field
+      // silently dropped the earlier source's reference and broke Undo for it). The "incl.
+      // rollover from #X, #Y" line is derived at render time from this array (see renderActions'
+      // caller / the amount cell below), not stored as a static note, so it always lists every
+      // contributing source correctly regardless of order.
       next[destIdx] = {
         ...dest,
         amount: dest.amount + source.amount,
-        rolledOverFrom: source.seq,
-        note: `Includes ${formatMoneyAED(source.amount)} carried over from ${source.dueDate} (occurrence #${source.seq}).`,
+        rolledOverFrom: [...(dest.rolledOverFrom ?? []), source.seq],
       };
       return next;
     });
@@ -146,19 +151,28 @@ export default function ContractDetailPage({
   }
 
   // Reverses handleRollover — for the "I didn't mean to press that" case. Only enabled while
-  // the destination occurrence hasn't itself been submitted (see canUndoRollover).
+  // the destination occurrence hasn't itself been submitted (see canUndoRollover). Removes ONLY
+  // this source's contribution — a destination that received more than one rollover keeps the
+  // others intact (this is exactly the case that used to break: undoing one source used to wipe
+  // the destination's single rolledOverFrom field entirely, disabling Undo for every OTHER source
+  // still rolled onto it too).
   function handleUndoRollover(seq: number) {
     setOccurrences((prev) => {
       if (!canUndoRollover(prev, seq)) return prev;
       const idx = prev.findIndex((o) => o.seq === seq);
       if (idx === -1) return prev;
       const source = prev[idx];
-      const destIdx = prev.findIndex((o) => o.rolledOverFrom === source.seq);
+      const destIdx = prev.findIndex((o) => (o.rolledOverFrom ?? []).includes(source.seq));
       if (destIdx === -1) return prev;
       const dest = prev[destIdx];
+      const remaining = (dest.rolledOverFrom ?? []).filter((s) => s !== source.seq);
       const next = [...prev];
       next[idx] = { ...source, rolledOver: "none" };
-      next[destIdx] = { ...dest, amount: dest.amount - source.amount, rolledOverFrom: undefined, note: undefined };
+      next[destIdx] = {
+        ...dest,
+        amount: dest.amount - source.amount,
+        rolledOverFrom: remaining.length > 0 ? remaining : undefined,
+      };
       return next;
     });
   }
@@ -454,9 +468,9 @@ export default function ContractDetailPage({
                     <td className="px-3.5 py-2 text-text-primary">{o.dueDate}</td>
                     <td className="px-3.5 py-2 font-semibold text-text-primary">
                       {formatMoneyAED(o.amount)}
-                      {o.rolledOverFrom && (
+                      {o.rolledOverFrom && o.rolledOverFrom.length > 0 && (
                         <div className="text-[11px] font-normal text-text-muted">
-                          incl. rollover from #{o.rolledOverFrom}
+                          incl. rollover from {o.rolledOverFrom.map((s) => `#${s}`).join(", ")}
                         </div>
                       )}
                     </td>
