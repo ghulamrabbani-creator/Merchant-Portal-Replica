@@ -15,7 +15,14 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { directDebitContracts } from "@/lib/mock-data";
-import { formatMoneyAED, RETRY_CAP, canRolloverOccurrence, canUndoRollover, rolloverStreakUsed } from "@/lib/direct-debit";
+import {
+  formatMoneyAED,
+  RETRY_CAP,
+  canRolloverOccurrence,
+  canUndoRollover,
+  rolloverStreakUsed,
+  rolloverDestinationOptions,
+} from "@/lib/direct-debit";
 import StatCard from "@/components/ui/StatCard";
 import StatusDot from "@/components/ui/StatusDot";
 import Modal from "@/components/ui/Modal";
@@ -56,6 +63,10 @@ export default function ContractDetailPage({
   const [occurrences, setOccurrences] = useState<DirectDebitOccurrence[]>(found?.occurrences ?? []);
   const [pauseModalOpen, setPauseModalOpen] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  // Which destination occurrence is currently selected in each Skipped row's rollover dropdown,
+  // keyed by the SOURCE occurrence's seq. Only populated once the merchant changes the dropdown
+  // away from its default (nearest non-ceiling-breaching option) — see renderActions.
+  const [rolloverSelections, setRolloverSelections] = useState<Record<number, number>>({});
 
   const summary = useMemo(() => {
     const paid = occurrences.filter((o) => o.status === "Paid");
@@ -100,17 +111,20 @@ export default function ContractDetailPage({
   }
 
   // Manual rollover for a Skipped occurrence (see Notes/Projects/Direct Debit.md — "Skipped
-  // (Paused)" occurrence status). Unlike the automatic Failed-occurrence rollover, this is a
+  // occurrences & manual rollover"). Unlike the automatic Failed-occurrence rollover, this is a
   // merchant choice: pressing the button sets THIS occurrence's `rolledOver` flag to
   // "rolled_over" (its own `status` stays "Skipped" — status and rolledOver are independent
-  // fields, see the DDRolloverState comment in lib/types.ts) and folds its amount onto the next
-  // occurrence. The button then flips to "Undo rollover" on this same row.
-  function handleRollover(seq: number) {
+  // fields, see the DDRolloverState comment in lib/types.ts) and folds its amount onto whichever
+  // upcoming occurrence the merchant picked from the dropdown (`destSeq`) — no longer assumed to
+  // be `seq + 1`, so a merchant with several consecutive Skipped occurrences can spread them
+  // across different future occurrences instead of laddering through each other. The button then
+  // flips to "Undo rollover" on this same row.
+  function handleRollover(seq: number, destSeq: number) {
     setOccurrences((prev) => {
-      const eligibility = canRolloverOccurrence(c, prev, seq);
+      const eligibility = canRolloverOccurrence(c, subscriptionStatus, prev, seq, destSeq);
       if (!eligibility.allowed) return prev;
       const idx = prev.findIndex((o) => o.seq === seq);
-      const destIdx = prev.findIndex((o) => o.seq === seq + 1);
+      const destIdx = prev.findIndex((o) => o.seq === destSeq);
       if (idx === -1 || destIdx === -1) return prev;
       const source = prev[idx];
       const dest = prev[destIdx];
@@ -122,6 +136,11 @@ export default function ContractDetailPage({
         rolledOverFrom: source.seq,
         note: `Includes ${formatMoneyAED(source.amount)} carried over from ${source.dueDate} (occurrence #${source.seq}).`,
       };
+      return next;
+    });
+    setRolloverSelections((prev) => {
+      const next = { ...prev };
+      delete next[seq];
       return next;
     });
   }
@@ -196,30 +215,72 @@ export default function ContractDetailPage({
         );
       }
 
-      const eligibility = canRolloverOccurrence(c, occurrences, o.seq);
+      // Destination is merchant-chosen (see Direct Debit.md, "Skipped occurrences & manual
+      // rollover") — only upcoming Scheduled occurrences qualify, so a Skipped or Failed
+      // occurrence can never be picked as where the amount lands. `canRolloverOccurrence` without
+      // a destSeq answers "is Rollover available at all" (contract toggle, pause state, streak
+      // cap, at least one non-breaching destination); once a destination is selected the same
+      // function re-checks THAT specific choice before committing.
+      const gate = canRolloverOccurrence(c, subscriptionStatus, occurrences, o.seq);
+      const options = rolloverDestinationOptions(c, occurrences, o.seq);
+      const defaultDest = options.find((opt) => !opt.wouldBreachCeiling)?.seq ?? options[0]?.seq;
+      const selectedDest = rolloverSelections[o.seq] ?? defaultDest;
+      const confirmEligibility =
+        gate.allowed && selectedDest != null
+          ? canRolloverOccurrence(c, subscriptionStatus, occurrences, o.seq, selectedDest)
+          : gate;
+
+      const gateTitle =
+        gate.reason === "subscription_paused"
+          ? "Rollover is disabled while the subscription is paused — Resume it first."
+          : gate.reason === "rollover_disabled"
+            ? "Rollover isn't enabled on this contract."
+            : gate.reason === "exhausted"
+              ? `No rollover left — ${c.rolloversAllowed} of ${c.rolloversAllowed} already used in this consecutive run.`
+              : gate.reason === "no_future_occurrence"
+                ? "No upcoming Scheduled occurrence to roll this onto."
+                : undefined;
+      const confirmTitle =
+        confirmEligibility.reason === "blocked_by_ceiling"
+          ? "Rolling onto the selected occurrence would exceed the contract's max amount ceiling — pick a different one."
+          : gateTitle;
+
       return (
-        <button
-          onClick={() => eligibility.allowed && handleRollover(o.seq)}
-          disabled={!eligibility.allowed}
-          title={
-            eligibility.reason === "exhausted"
-              ? `No rollover left — ${c.rolloversAllowed} of ${c.rolloversAllowed} already used in this run.`
-              : eligibility.reason === "blocked_by_ceiling"
-                ? "Rolling this forward would exceed the contract's max amount ceiling."
-                : eligibility.reason === "no_future_occurrence"
-                  ? "No future occurrence to roll this onto."
-                  : undefined
-          }
-          className={clsx(
-            "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium",
-            eligibility.allowed
-              ? "border-brand-blue text-brand-blue hover:bg-brand-blue/5"
-              : "border-border-color text-text-muted cursor-not-allowed"
+        <div className="flex flex-col gap-1">
+          {gate.allowed && options.length > 0 && (
+            <select
+              value={selectedDest ?? ""}
+              onChange={(e) =>
+                setRolloverSelections((prev) => ({ ...prev, [o.seq]: Number(e.target.value) }))
+              }
+              className="rounded-md border border-border-color bg-white px-1.5 py-1 text-[11px] text-text-primary"
+            >
+              {options.map((opt) => (
+                <option key={opt.seq} value={opt.seq} disabled={opt.wouldBreachCeiling}>
+                  #{opt.seq} · {opt.dueDate} → {formatMoneyAED(opt.resultingAmount)}
+                  {opt.wouldBreachCeiling ? " (exceeds ceiling)" : ""}
+                </option>
+              ))}
+            </select>
           )}
-        >
-          <RotateCw size={12} />
-          Rollover
-        </button>
+          <button
+            onClick={() => confirmEligibility.allowed && selectedDest != null && handleRollover(o.seq, selectedDest)}
+            disabled={!confirmEligibility.allowed}
+            title={confirmTitle}
+            className={clsx(
+              "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium",
+              confirmEligibility.allowed
+                ? "border-brand-blue text-brand-blue hover:bg-brand-blue/5"
+                : "border-border-color text-text-muted cursor-not-allowed"
+            )}
+          >
+            <RotateCw size={12} />
+            Rollover
+          </button>
+          {gate.reason === "subscription_paused" && (
+            <div className="max-w-[220px] text-[11px] text-text-muted">Disabled while paused.</div>
+          )}
+        </div>
       );
     }
 
