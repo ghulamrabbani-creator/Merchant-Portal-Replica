@@ -144,23 +144,26 @@ export function formatMoneyAED(amount: number): string {
 // moment any occurrence on the subscription is actually collected (Paid), because a
 // successful collection clears whatever had stacked up.
 
-/** How many CONSECUTIVE rollovers have already been used in the run leading up to (but not
- *  including) `beforeSeq` — walks backward until it hits a Paid occurrence or the start of the
- *  schedule. A Paid occurrence breaks the streak; anything else that isn't itself rolled-over
- *  also breaks it (there's nothing to chain). */
-export function rolloverStreakUsed(occurrences: DirectDebitOccurrence[], beforeSeq: number): number {
-  let used = 0;
-  for (let seq = beforeSeq - 1; seq >= 1; seq--) {
-    const o = occurrences.find((x) => x.seq === seq);
-    if (!o) break;
-    if (o.status === "Paid") break;
-    if (o.rolledOver === "rolled_over") {
-      used++;
-      continue;
-    }
-    break;
-  }
-  return used;
+/** How many rollovers are currently active on this subscription — i.e. how many occurrences are
+ *  flagged `rolled_over` since the most recent Paid occurrence (by sequence number). Resets the
+ *  moment ANY occurrence on the subscription is collected in full, per the agreed Sep 2026
+ *  mechanics ("a successful collection clears whatever had stacked up") — deliberately global,
+ *  not scoped to one particular rollover chain, even once a merchant-chosen destination means two
+ *  unrelated rollovers can be in flight toward two different future occurrences at once.
+ *
+ *  CHANGED Sep 2026 (bug found by Rabbani testing DD-2026-00085): this used to walk backward
+ *  through PHYSICALLY ADJACENT sequence numbers immediately preceding a given occurrence, which
+ *  only worked because rollovers always used to chain onto `seq + 1`. Once the merchant can pick
+ *  any upcoming Scheduled occurrence as the destination (see canRolloverOccurrence below), that
+ *  adjacency assumption breaks — rolling #2 onto #6 and #3 onto #5 are two independent rollovers
+ *  that an adjacency walk starting from #3 would never see #2 through (their destinations aren't
+ *  next to each other), so the old function silently undercounted and let more rollovers through
+ *  than `rolloversAllowed` permits. Counting every currently-unresolved `rolled_over` flag since
+ *  the last Paid occurrence — regardless of which destination each one targets — is what actually
+ *  matches the documented "consecutive-streak-with-reset" rule now that destinations are free-form. */
+export function rolloverStreakUsed(occurrences: DirectDebitOccurrence[]): number {
+  const lastPaidSeq = occurrences.reduce((max, o) => (o.status === "Paid" && o.seq > max ? o.seq : max), 0);
+  return occurrences.filter((o) => o.seq > lastPaidSeq && o.rolledOver === "rolled_over").length;
 }
 
 export type RolloverBlockedReason =
@@ -229,7 +232,7 @@ export function canRolloverOccurrence(
   if (!contract.rolloverEnabled) return { allowed: false, reason: "rollover_disabled" };
   if (subscriptionStatus === "Paused") return { allowed: false, reason: "subscription_paused" };
 
-  const used = rolloverStreakUsed(occurrences, seq);
+  const used = rolloverStreakUsed(occurrences);
   if (used >= contract.rolloversAllowed) return { allowed: false, reason: "exhausted" };
 
   const options = rolloverDestinationOptions(contract, occurrences, seq);
@@ -258,9 +261,13 @@ export function canRolloverOccurrence(
  *  Deliberately independent of `Subscription.status`: unlike initiating a new rollover (blocked
  *  while Paused, see `canRolloverOccurrence`), undoing one just reverses the merchant's own prior
  *  choice and doesn't depend on the schedule being live — so Undo stays available even while the
- *  subscription is Paused. */
+ *  subscription is Paused.
+ *
+ *  `rolledOverFrom` is an array (changed Sep 2026) since a destination can now receive more than
+ *  one source — find the destination that has THIS seq among its sources, not the single field a
+ *  seq+1-only world used to allow. */
 export function canUndoRollover(occurrences: DirectDebitOccurrence[], seq: number): boolean {
-  const dest = occurrences.find((o) => o.rolledOverFrom === seq);
+  const dest = occurrences.find((o) => (o.rolledOverFrom ?? []).includes(seq));
   if (!dest) return false;
   return dest.status === "Scheduled" || dest.status === "Skipped";
 }
