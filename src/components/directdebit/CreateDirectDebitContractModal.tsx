@@ -43,6 +43,10 @@ export default function CreateDirectDebitContractModal({
   const [maxStepReached, setMaxStepReached] = useState<Step>(1);
 
   const [instrumentType, setInstrumentType] = useState<DDInstrumentType>("Bank Account");
+  // TBFC (To Be Filled By Customer, added Sep 2026): merchant defers instrument details to the
+  // customer's own review-and-sign step. Restricted to Bank Account — see Direct Debit.md's PCI
+  // discussion for why Credit Card is excluded under TBFC.
+  const [tbfc, setTbfc] = useState(false);
   const [amountType, setAmountType] = useState<DDAmountType>("Variable");
   const [frequencyCeiling, setFrequencyCeiling] = useState<DDFrequency>("Monthly");
   const [collectionFrequency, setCollectionFrequency] = useState<DDFrequency>("Monthly");
@@ -209,7 +213,9 @@ export default function CreateDirectDebitContractModal({
     }));
     const newContract: DirectDebitContract = {
       id,
-      ref: nextContractRef(directDebitContracts),
+      // TBFC: Create DDA hasn't been called, so DDS has issued nothing yet — no reference until
+      // the customer completes the instrument step on the Sign page. See PENDING_INSTRUMENT_REF_LABEL.
+      ref: tbfc ? "" : nextContractRef(directDebitContracts),
       merchantRef,
       notes: notes.trim() || undefined,
       contractDescription: contractDescription.trim() || undefined,
@@ -217,9 +223,10 @@ export default function CreateDirectDebitContractModal({
       customerName,
       customerIdType: "Emirates ID",
       customerIdNumber,
-      instrumentType,
-      bankName: bankActive ? bankName : issuingBank,
-      maskedInstrumentRef: maskInstrumentRef(bankActive ? iban : cardNumber),
+      // Fixed to Bank Account under TBFC — no instrument-type choice to defer in practice.
+      instrumentType: tbfc ? "Bank Account" : instrumentType,
+      bankName: tbfc ? undefined : bankActive ? bankName : issuingBank,
+      maskedInstrumentRef: tbfc ? "" : maskInstrumentRef(bankActive ? iban : cardNumber),
       commencesOn: formatDateNice(parseDateStr(commencesOn)),
       expiresOn: formatDateNice(parseDateStr(expiresOn)),
       frequency: frequencyCeiling,
@@ -230,8 +237,13 @@ export default function CreateDirectDebitContractModal({
       rolloverEnabled: effectiveRolloverEnabled,
       rolloversAllowed,
       rolloverRemaining: rolloversAllowed,
-      status: "Pending Customer Sign",
+      status: tbfc ? "Awaiting Customer Details" : "Pending Customer Sign",
       subscriptionStatus: "Active",
+      instrumentProvidedBy: tbfc ? "customer" : "merchant",
+      mandateCreationStage: tbfc ? "awaiting_customer_instrument" : "submitted_to_dds",
+      awaitingInstrumentNote: tbfc
+        ? "Waiting on the customer to supply their bank account details on the contract sign page before this mandate can be submitted to DDS. Nothing has been sent to DDS yet — no reference exists until that step completes."
+        : undefined,
       occurrences,
     };
     directDebitContracts.unshift(newContract);
@@ -365,82 +377,112 @@ export default function CreateDirectDebitContractModal({
               </div>
 
               <Label>Payment instrument</Label>
-              <div className="mb-4 flex rounded-xl bg-page-bg p-1">
-                <button onClick={() => setInstrumentType("Bank Account")} className={bankActive ? pillActive : pillInactive}>
-                  Bank Account
-                </button>
-                <button onClick={() => setInstrumentType("Credit Card")} className={!bankActive ? pillActive : pillInactive}>
-                  Credit Card
-                </button>
-              </div>
 
-              {bankActive ? (
-                <div key="bank-account-fields" className="mb-4 grid grid-cols-2 gap-3.5">
-                  <div>
-                    <Label>Bank name</Label>
-                    <select
-                      value={bankName}
-                      onChange={(e) => setBankName(e.target.value)}
-                      className="w-full rounded-lg border border-border-color bg-white px-3 py-2.5 text-sm outline-none"
-                    >
-                      {DDS_BANKS.map((bank) => (
-                        <option key={bank} value={bank}>
-                          {bank}
-                        </option>
-                      ))}
-                    </select>
-                    <Help>Per the DDS Banks Master Table</Help>
-                  </div>
-                  <div>
-                    <Label>Account holder title</Label>
-                    <input
-                      value={accountHolderTitle}
-                      onChange={(e) => setAccountHolderTitle(e.target.value)}
-                      className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Label>IBAN</Label>
-                    <input
-                      value={iban}
-                      onChange={(e) => setIban(e.target.value)}
-                      className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
-                    />
+              <div className="mb-3 flex items-start gap-2.5 rounded-lg border border-border-color bg-page-bg px-3.5 py-3">
+                <button
+                  onClick={() => setTbfc((v) => !v)}
+                  className={clsx(
+                    "mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border-[1.5px]",
+                    tbfc ? "border-brand-blue bg-brand-blue" : "border-border-color bg-white"
+                  )}
+                >
+                  {tbfc && <Check size={12} strokeWidth={3} className="text-white" />}
+                </button>
+                <div>
+                  <div className="text-[13px] font-medium text-text-primary">To Be Filled By Customer</div>
+                  <div className="mt-0.5 text-[11.5px] text-text-muted">
+                    Leave instrument details to the customer — they&apos;ll supply their bank account on their own
+                    review-and-sign step. Restricted to Bank Account; Create DDA isn&apos;t called until they
+                    complete that step.
                   </div>
                 </div>
+              </div>
+
+              {!tbfc ? (
+                <>
+                  <div className="mb-4 flex rounded-xl bg-page-bg p-1">
+                    <button onClick={() => setInstrumentType("Bank Account")} className={bankActive ? pillActive : pillInactive}>
+                      Bank Account
+                    </button>
+                    <button onClick={() => setInstrumentType("Credit Card")} className={!bankActive ? pillActive : pillInactive}>
+                      Credit Card
+                    </button>
+                  </div>
+
+                  {bankActive ? (
+                    <div key="bank-account-fields" className="mb-4 grid grid-cols-2 gap-3.5">
+                      <div>
+                        <Label>Bank name</Label>
+                        <select
+                          value={bankName}
+                          onChange={(e) => setBankName(e.target.value)}
+                          className="w-full rounded-lg border border-border-color bg-white px-3 py-2.5 text-sm outline-none"
+                        >
+                          {DDS_BANKS.map((bank) => (
+                            <option key={bank} value={bank}>
+                              {bank}
+                            </option>
+                          ))}
+                        </select>
+                        <Help>Per the DDS Banks Master Table</Help>
+                      </div>
+                      <div>
+                        <Label>Account holder title</Label>
+                        <input
+                          value={accountHolderTitle}
+                          onChange={(e) => setAccountHolderTitle(e.target.value)}
+                          className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <Label>IBAN</Label>
+                        <input
+                          value={iban}
+                          onChange={(e) => setIban(e.target.value)}
+                          className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div key="credit-card-fields" className="mb-4 grid grid-cols-2 gap-3.5">
+                      <div>
+                        <Label>Card holder name</Label>
+                        <input
+                          value={cardHolderName}
+                          onChange={(e) => setCardHolderName(e.target.value)}
+                          className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                        />
+                      </div>
+                      <div>
+                        <Label>Issuing bank</Label>
+                        <select
+                          value={issuingBank}
+                          onChange={(e) => setIssuingBank(e.target.value)}
+                          className="w-full rounded-lg border border-border-color bg-white px-3 py-2.5 text-sm outline-none"
+                        >
+                          {DDS_BANKS.map((bank) => (
+                            <option key={bank} value={bank}>
+                              {bank}
+                            </option>
+                          ))}
+                        </select>
+                        <Help>Per the DDS Banks Master Table</Help>
+                      </div>
+                      <div className="col-span-2">
+                        <Label>Card number</Label>
+                        <input
+                          value={cardNumber}
+                          onChange={(e) => setCardNumber(e.target.value)}
+                          className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
-                <div key="credit-card-fields" className="mb-4 grid grid-cols-2 gap-3.5">
-                  <div>
-                    <Label>Card holder name</Label>
-                    <input
-                      value={cardHolderName}
-                      onChange={(e) => setCardHolderName(e.target.value)}
-                      className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
-                    />
-                  </div>
-                  <div>
-                    <Label>Issuing bank</Label>
-                    <select
-                      value={issuingBank}
-                      onChange={(e) => setIssuingBank(e.target.value)}
-                      className="w-full rounded-lg border border-border-color bg-white px-3 py-2.5 text-sm outline-none"
-                    >
-                      {DDS_BANKS.map((bank) => (
-                        <option key={bank} value={bank}>
-                          {bank}
-                        </option>
-                      ))}
-                    </select>
-                    <Help>Per the DDS Banks Master Table</Help>
-                  </div>
-                  <div className="col-span-2">
-                    <Label>Card number</Label>
-                    <input
-                      value={cardNumber}
-                      onChange={(e) => setCardNumber(e.target.value)}
-                      className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
-                    />
-                  </div>
+                <div className="mb-4 rounded-lg border border-dashed border-border-color px-3.5 py-3 text-[12.5px] text-text-muted">
+                  Bank account details will be collected from the customer on the contract sign page — nothing to
+                  enter here.
                 </div>
               )}
 
@@ -728,11 +770,17 @@ export default function CreateDirectDebitContractModal({
                   label="Contract description"
                   value={contractDescription.trim() || "Not set — customer will only see your company name"}
                 />
-                <ReviewRow label="Payment instrument" value={instrumentSummary} />
-                {bankActive ? (
-                  <ReviewRow label="IBAN" value={iban} />
+                {tbfc ? (
+                  <ReviewRow label="Bank details" value="To be completed by customer" />
                 ) : (
-                  <ReviewRow label="Card number" value={`•••• •••• •••• ${cardNumber.replace(/\D/g, "").slice(-4) || "0000"}`} />
+                  <>
+                    <ReviewRow label="Payment instrument" value={instrumentSummary} />
+                    {bankActive ? (
+                      <ReviewRow label="IBAN" value={iban} />
+                    ) : (
+                      <ReviewRow label="Card number" value={`•••• •••• •••• ${cardNumber.replace(/\D/g, "").slice(-4) || "0000"}`} />
+                    )}
+                  </>
                 )}
                 <ReviewRow label="Validity" value={validityLabel} />
                 <ReviewRow label="Collection type" value={collectionTypeSummary} />
@@ -773,7 +821,7 @@ export default function CreateDirectDebitContractModal({
                 {showDescriptionInPanel && (
                   <SummaryRow label="Description" value={contractDescription} />
                 )}
-                <SummaryRow label="Instrument" value={instrumentSummary} />
+                <SummaryRow label="Instrument" value={tbfc ? "To be filled by customer" : instrumentSummary} />
                 <SummaryRow label="Amount type" value={amountTypeSummary} />
                 <SummaryRow label="Frequency" value={panelFrequency} />
                 {showRolloverInPanel && <SummaryRow label="Rollover" value={rolloverSummary} />}
