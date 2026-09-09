@@ -205,11 +205,27 @@ export type DDAmountType = "Fixed" | "Variable";
 
 export type DDContractStatus =
   | "Active"
+  | "Awaiting Customer Details"
   | "Pending Customer Sign"
   | "Pending Bank Approval"
   | "Suspended"
   | "Rejected"
   | "Cancelled";
+
+/** Who supplies the payment instrument (IBAN/card) at contract-creation time — added Sep 2026
+ *  for the To Be Filled By Customer (TBFC) flow. "merchant" is the existing path (unchanged
+ *  default). "customer" means the merchant deliberately left instrument details blank and the
+ *  customer supplies them during their own review-and-sign step — see `mandateCreationStage`
+ *  and Notes/Projects/Direct Debit.md, "To Be Filled By Customer (TBFC) instrument flow." */
+export type DDInstrumentProvidedBy = "merchant" | "customer";
+
+/** Only meaningful when `instrumentProvidedBy === "customer"`. DDS confirmed (08-Sep-2026)
+ *  Create DDA always requires the complete payload — there is no deferred-submission mode on
+ *  their side — so under TBFC, Geidea holds everything locally and does NOT call Create DDA
+ *  until the customer supplies their instrument. `status_code`/`ref` only exist from that point
+ *  on; before it, the Merchant Portal needs its own stage label distinct from DDS's status
+ *  table (see DDContractStatus: "Awaiting Customer Details"). */
+export type DDMandateCreationStage = "awaiting_customer_instrument" | "submitted_to_dds";
 
 /** Subscription-level only — independent of the Mandate's own DDContractStatus above.
  *  See Notes/Projects/Direct Debit.md, Contract Detail screen §Pause: Pause suspends the
@@ -303,4 +319,13 @@ export interface DirectDebitContract {
   emptyNote?: string;
   cancelledNote?: string;
   pausedNote?: string;
+  /** Added Sep 2026 for TBFC. Absent/undefined is equivalent to "merchant" — every contract
+   *  before this feature, and every contract created without checking the TBFC box, provides
+   *  its own instrument up front exactly as today. */
+  instrumentProvidedBy?: DDInstrumentProvidedBy;
+  /** Only set when instrumentProvidedBy === "customer". See DDMandateCreationStage above. */
+  mandateCreationStage?: DDMandateCreationStage;
+  /** Banner shown on the Contract Detail screen while mandateCreationStage is still
+   *  "awaiting_customer_instrument" — mirrors pausedNote/cancelledNote's pattern above. */
+  awaitingInstrumentNote?: string;
 }
