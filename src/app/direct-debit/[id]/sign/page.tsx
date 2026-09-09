@@ -4,14 +4,27 @@ import { use, useEffect, useState } from "react";
 import { notFound } from "next/navigation";
 import { Landmark, CreditCard, ShieldCheck, CheckCircle2, Loader2, FileText } from "lucide-react";
 import { directDebitContracts, STORE_NAME } from "@/lib/mock-data";
-import { formatMoneyAED } from "@/lib/direct-debit";
+import { formatMoneyAED, maskInstrumentRef, nextContractRef, PENDING_INSTRUMENT_REF_LABEL } from "@/lib/direct-debit";
+import { DDS_BANKS } from "@/lib/types";
 
-type SignStep = "review" | "fetching" | "unsigned" | "signing" | "signed";
+// "instrument" (added Sep 2026, TBFC): inserted before "review" when the merchant left
+// instrument details for the customer to supply — see Notes/Projects/Direct Debit.md, "To Be
+// Filled By Customer (TBFC) instrument flow." Create DDA is only called once this step commits,
+// which is also when a real mandate reference first exists (see PENDING_INSTRUMENT_REF_LABEL).
+type SignStep = "instrument" | "review" | "fetching" | "unsigned" | "signing" | "signed";
 
 export default function ContractSignPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const found = directDebitContracts.find((c) => c.id === id);
-  const [step, setStep] = useState<SignStep>("review");
+  const [step, setStep] = useState<SignStep>(
+    found?.mandateCreationStage === "awaiting_customer_instrument" ? "instrument" : "review"
+  );
+
+  // TBFC instrument-capture form state — reuses the same bank-detail field set and validation
+  // rules already used in the merchant-entered path (CreateDirectDebitContractModal Step 1).
+  const [instBankName, setInstBankName] = useState<string>(DDS_BANKS[0]);
+  const [instAccountHolderTitle, setInstAccountHolderTitle] = useState(found?.customerName ?? "");
+  const [instIban, setInstIban] = useState("");
 
   useEffect(() => {
     if (!found) return;
@@ -30,6 +43,23 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
 
   if (!found) return notFound();
   const c = found;
+
+  // Commits the customer-supplied instrument and simulates Create DDA being called for the
+  // first time — this is the moment DDS actually issues a mandate reference under TBFC (see
+  // the confirmed design in Direct Debit.md: "Geidea calls Create DDA in real time, for the
+  // first time, now with a complete payload"). Mutates the shared mock-data object directly,
+  // matching every other mutation on this page/screen set (Pause/Resume/Retry/Rollover, and the
+  // status flip on successful signing just below).
+  function handleSubmitInstrument() {
+    const target = directDebitContracts.find((x) => x.id === id);
+    if (!target) return;
+    target.bankName = instBankName;
+    target.maskedInstrumentRef = maskInstrumentRef(instIban);
+    target.ref = nextContractRef(directDebitContracts);
+    target.mandateCreationStage = "submitted_to_dds";
+    target.status = "Pending Customer Sign";
+    setStep("review");
+  }
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-page-bg">
@@ -83,7 +113,7 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
             Contract terms
           </div>
           <div className="grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm">
-            <Row label="Contract reference" value={c.ref} />
+            <Row label="Contract reference" value={c.ref || PENDING_INSTRUMENT_REF_LABEL} />
             <Row label="Contract duration" value={`${c.commencesOn} – ${c.expiresOn}`} />
             <Row label="Collection frequency" value={c.frequency} />
             <Row
@@ -97,11 +127,15 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
             <Row
               label="Payment instrument"
               value={
-                <span className="inline-flex items-center gap-1.5">
-                  {c.instrumentType === "Bank Account" ? <Landmark size={13} /> : <CreditCard size={13} />}
-                  {c.instrumentType} {c.maskedInstrumentRef}
-                  {c.bankName ? `, ${c.bankName}` : ""}
-                </span>
+                c.maskedInstrumentRef ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    {c.instrumentType === "Bank Account" ? <Landmark size={13} /> : <CreditCard size={13} />}
+                    {c.instrumentType} {c.maskedInstrumentRef}
+                    {c.bankName ? `, ${c.bankName}` : ""}
+                  </span>
+                ) : (
+                  "To be provided by you, below"
+                )
               }
             />
             <Row
@@ -143,6 +177,54 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
 
         {/* Action / state machine */}
         <div className="rounded-xl border border-border-color bg-white p-6 text-center">
+          {step === "instrument" && (
+            <div className="text-left">
+              <p className="mb-4 text-center text-sm text-text-secondary">
+                {STORE_NAME} left your bank account details for you to provide. Enter them below to continue —
+                this contract won&apos;t be submitted for approval until you do.
+              </p>
+              <div className="mb-3.5">
+                <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">Bank name</label>
+                <select
+                  value={instBankName}
+                  onChange={(e) => setInstBankName(e.target.value)}
+                  className="w-full rounded-lg border border-border-color bg-white px-3 py-2.5 text-sm outline-none"
+                >
+                  {DDS_BANKS.map((bank) => (
+                    <option key={bank} value={bank}>
+                      {bank}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="mb-3.5">
+                <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">
+                  Account holder title
+                </label>
+                <input
+                  value={instAccountHolderTitle}
+                  onChange={(e) => setInstAccountHolderTitle(e.target.value)}
+                  className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                />
+              </div>
+              <div className="mb-5">
+                <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">IBAN</label>
+                <input
+                  value={instIban}
+                  onChange={(e) => setInstIban(e.target.value)}
+                  placeholder="AE07 0331 2345 6789 0123 456"
+                  className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                />
+              </div>
+              <button
+                onClick={handleSubmitInstrument}
+                disabled={!instIban.trim() || !instAccountHolderTitle.trim()}
+                className="w-full rounded-lg bg-brand-blue px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Continue to Review &amp; Sign
+              </button>
+            </div>
+          )}
           {step === "review" && (
             <>
               <p className="mb-4 text-sm text-text-secondary">
