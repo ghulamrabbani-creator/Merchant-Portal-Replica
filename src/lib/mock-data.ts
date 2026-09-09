@@ -835,4 +835,38 @@ export const directDebitContracts: DirectDebitContract[] = [
     // per the confirmed design, Subscription/Occurrence creation isn't gated on a dda_id existing.
     occurrences: genOccurrences("2026-09-15", "Monthly", 12, 250),
   },
+  // dd12 — new (Sep 2026): same TBFC state as dd11, but the merchant picked Credit Card as the
+  // instrument type instead of Bank Account. Added after Rabbani caught that dd11 was the only
+  // TBFC demo record and it happened to be Bank Account, making the card-side of the Sign page's
+  // instrument step (card holder name / issuing bank / card number fields) unreachable without
+  // hand-building a new contract through the creation modal every time.
+  {
+    id: "dd12",
+    ref: "", // no DDS reference yet — see PENDING_INSTRUMENT_REF_LABEL
+    merchantRef: "INV-2026-08915",
+    notes: "TBFC demo — card details not yet supplied by the customer",
+    contractDescription: "Monthly software subscription fee collection.",
+    createdOn: "08 Sep 2026, 05:05 PM",
+    customerName: "Awaiting Card", // demo: TBFC — credit card details not yet supplied by the customer
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1996-3344556-7",
+    instrumentType: "Credit Card",
+    maskedInstrumentRef: "", // not yet supplied
+    commencesOn: "18 Sep 2026",
+    expiresOn: "18 Sep 2027", // 12 monthly occurrences once the customer completes their step
+    frequency: "Monthly",
+    amountType: "Fixed",
+    minAmount: 99,
+    maxAmount: 99,
+    rolloverEnabled: false,
+    rolloversAllowed: 0,
+    rolloverRemaining: 0,
+    status: "Awaiting Customer Details",
+    subscriptionStatus: "Active",
+    instrumentProvidedBy: "customer",
+    mandateCreationStage: "awaiting_customer_instrument",
+    awaitingInstrumentNote:
+      "Waiting on the customer to supply their credit card details on the contract sign page before this mandate can be submitted to DDS. Nothing has been sent to DDS yet — no reference exists until that step completes.",
+    occurrences: genOccurrences("2026-09-18", "Monthly", 12, 99),
+  },
 ];
