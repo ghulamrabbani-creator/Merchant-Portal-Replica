@@ -22,6 +22,7 @@ import {
   canUndoRollover,
   rolloverStreakUsed,
   rolloverDestinationOptions,
+  PENDING_INSTRUMENT_REF_LABEL,
 } from "@/lib/direct-debit";
 import StatCard from "@/components/ui/StatCard";
 import StatusDot from "@/components/ui/StatusDot";
@@ -308,7 +309,7 @@ export default function ContractDetailPage({
           Direct Debit
         </Link>
         <span>/</span>
-        <span>{c.ref}</span>
+        <span>{c.ref || c.merchantRef}</span>
       </div>
 
       <div className="mb-5 flex items-start justify-between">
@@ -321,7 +322,7 @@ export default function ContractDetailPage({
           </Link>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-bold text-text-primary">{c.ref}</h1>
+              <h1 className="text-2xl font-bold text-text-primary">{c.ref || c.merchantRef}</h1>
               <StatusDot status={c.status} />
               {subscriptionStatus === "Paused" && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-status-pending px-2.5 py-1 text-xs font-medium text-status-pending">
@@ -333,33 +334,41 @@ export default function ContractDetailPage({
             {c.statusNote && <div className="mt-1 text-sm text-text-muted">{c.statusNote}</div>}
           </div>
         </div>
-        <div className="flex items-center gap-2.5">
-          {subscriptionStatus === "Active" ? (
+        {c.status !== "Awaiting Customer Details" && (
+          <div className="flex items-center gap-2.5">
+            {subscriptionStatus === "Active" ? (
+              <button
+                onClick={() => setPauseModalOpen(true)}
+                className="flex items-center gap-2 rounded-lg border border-border-color bg-white px-4 py-2.5 text-sm font-medium text-text-primary hover:border-text-muted"
+              >
+                <PauseCircle size={16} />
+                Pause
+              </button>
+            ) : (
+              <button
+                onClick={() => setSubscriptionStatus("Active")}
+                className="flex items-center gap-2 rounded-lg border border-brand-blue px-4 py-2.5 text-sm font-medium text-brand-blue"
+              >
+                <PlayCircle size={16} />
+                Resume
+              </button>
+            )}
             <button
-              onClick={() => setPauseModalOpen(true)}
-              className="flex items-center gap-2 rounded-lg border border-border-color bg-white px-4 py-2.5 text-sm font-medium text-text-primary hover:border-text-muted"
+              onClick={() => setCancelModalOpen(true)}
+              className="flex items-center gap-2 rounded-lg border border-status-declined px-4 py-2.5 text-sm font-medium text-status-declined"
             >
-              <PauseCircle size={16} />
-              Pause
+              <Ban size={16} />
+              Cancel mandate
             </button>
-          ) : (
-            <button
-              onClick={() => setSubscriptionStatus("Active")}
-              className="flex items-center gap-2 rounded-lg border border-brand-blue px-4 py-2.5 text-sm font-medium text-brand-blue"
-            >
-              <PlayCircle size={16} />
-              Resume
-            </button>
-          )}
-          <button
-            onClick={() => setCancelModalOpen(true)}
-            className="flex items-center gap-2 rounded-lg border border-status-declined px-4 py-2.5 text-sm font-medium text-status-declined"
-          >
-            <Ban size={16} />
-            Cancel mandate
-          </button>
-        </div>
+          </div>
+        )}
       </div>
+
+      {c.awaitingInstrumentNote && c.status === "Awaiting Customer Details" && (
+        <div className="mb-5 rounded-lg border border-status-pending bg-status-pending/10 px-4 py-2.5 text-sm text-text-primary">
+          {c.awaitingInstrumentNote}
+        </div>
+      )}
 
       {c.pausedNote && subscriptionStatus === "Paused" && (
         <div className="mb-5 rounded-lg border border-status-pending bg-status-pending/10 px-4 py-2.5 text-sm text-text-primary">
@@ -396,7 +405,14 @@ export default function ContractDetailPage({
           <div>
             <Field label="Customer name" value={c.customerName} />
             <Field label={c.customerIdType} value={c.customerIdNumber} />
-            <Field label="Mandate reference" value={c.ref} />
+            <Field
+              label="Mandate reference"
+              value={
+                c.ref || (
+                  <span className="text-text-muted">{PENDING_INSTRUMENT_REF_LABEL}</span>
+                )
+              }
+            />
             <Field label="Merchant reference" value={c.merchantRef} />
             <Field label="Status" value={<StatusDot status={c.status} />} />
             <Field label="Created on" value={c.createdOn} />
@@ -414,15 +430,19 @@ export default function ContractDetailPage({
             <Field
               label="Payment method"
               value={
-                <span className="inline-flex items-center gap-1.5">
-                  {c.instrumentType === "Bank Account" ? (
-                    <Landmark size={14} strokeWidth={1.8} />
-                  ) : (
-                    <CreditCard size={14} strokeWidth={1.8} />
-                  )}
-                  {c.instrumentType} {c.maskedInstrumentRef}
-                  {c.bankName ? `, ${c.bankName}` : ""}
-                </span>
+                c.maskedInstrumentRef ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    {c.instrumentType === "Bank Account" ? (
+                      <Landmark size={14} strokeWidth={1.8} />
+                    ) : (
+                      <CreditCard size={14} strokeWidth={1.8} />
+                    )}
+                    {c.instrumentType} {c.maskedInstrumentRef}
+                    {c.bankName ? `, ${c.bankName}` : ""}
+                  </span>
+                ) : (
+                  <span className="text-text-muted">To be provided by customer</span>
+                )
               }
             />
           </div>
