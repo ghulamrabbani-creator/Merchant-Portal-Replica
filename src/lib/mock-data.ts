@@ -484,7 +484,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     notes: "Residential lease — Building 12, Unit 304",
     contractDescription: "Monthly rent collection — Building 12, Unit 304, for the 2026/27 tenancy term.",
     createdOn: "01 Sep 2026, 09:14 AM",
-    customerName: "Sara Ibrahim",
+    customerName: "Retry Pending", // demo: Failed occurrence #2 mid-retry (1 of 3 used), contract stays Active
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1990-1234567-1",
     instrumentType: "Bank Account",
@@ -514,7 +514,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     merchantRef: "INV-2026-08144",
     contractDescription: "Monthly membership fee for your annual subscription plan.",
     createdOn: "25 Aug 2026, 02:30 PM",
-    customerName: "Youssef Haddad",
+    customerName: "Retries Exhausted", // demo: retries exhausted, rollover disabled on this contract
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1988-2345678-2",
     instrumentType: "Credit Card",
@@ -542,7 +542,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     merchantRef: "INV-2026-07998",
     contractDescription: "Quarterly service charge for your maintenance agreement.",
     createdOn: "18 Aug 2026, 11:00 AM",
-    customerName: "Fatima Al Marri",
+    customerName: "Pending Approval", // demo: mandate Pending Bank Approval, no occurrences generated yet
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1992-3456789-3",
     instrumentType: "Bank Account",
@@ -569,7 +569,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     merchantRef: "INV-2026-07711",
     contractDescription: "Monthly installment for your 4-month payment plan.",
     createdOn: "10 Jul 2026, 04:45 PM",
-    customerName: "Omar Khaled",
+    customerName: "Rollover Blocked", // demo: rollover blocked — ceiling equals the installment itself
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1985-4567890-4",
     instrumentType: "Bank Account",
@@ -599,7 +599,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     merchantRef: "INV-2026-07340",
     contractDescription: "Monthly subscription fee for your 2-year service plan.",
     createdOn: "05 Jul 2026, 09:00 AM",
-    customerName: "Lina Suleiman",
+    customerName: "Paused Skipped", // demo: subscription Paused, occurrence #3 Skipped, 24-occurrence/2yr cap
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1990-5678901-5",
     instrumentType: "Credit Card",
@@ -629,7 +629,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     merchantRef: "INV-2026-06905",
     contractDescription: "Monthly membership fee collection.",
     createdOn: "28 May 2026, 01:20 PM",
-    customerName: "Khalid Al Qahtani",
+    customerName: "Mandate Rejected", // demo: mandate Rejected — Invalid Payer Account
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1979-6789012-6",
     instrumentType: "Bank Account",
@@ -657,7 +657,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     notes: "Service subscription — annual maintenance contract",
     contractDescription: "Annual maintenance contract — monthly service fee, billed based on usage.",
     createdOn: "10 May 2026, 10:10 AM",
-    customerName: "Rania Farouk",
+    customerName: "Rollover Recovered", // demo: occurrence #2 rolled over then fully recovered on #3
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1991-7890123-7",
     instrumentType: "Bank Account",
@@ -689,7 +689,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     merchantRef: "INV-2026-06103",
     contractDescription: "Monthly subscription fee collection.",
     createdOn: "20 Mar 2026, 03:15 PM",
-    customerName: "Ahmed Mansour",
+    customerName: "Contract Cancelled", // demo: Cancelled mid-term, occurrence count reflects the shortened life
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1983-8901234-8",
     instrumentType: "Bank Account",
@@ -730,7 +730,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     notes: "Equipment lease — consecutive-failure / rollover-exhaustion scenario",
     contractDescription: "Monthly equipment lease payment, billed based on usage.",
     createdOn: "12 Feb 2026, 10:40 AM",
-    customerName: "Hassan Zaidi",
+    customerName: "Rollover Exhausted", // demo: consecutive-streak rollover cap hit, then reset after a Paid occurrence
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1987-9012345-9",
     instrumentType: "Bank Account",
@@ -768,7 +768,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     notes: "Community charges — paused mid-term, two occurrences skipped",
     contractDescription: "Monthly community service charges, billed based on usage.",
     createdOn: "02 Jan 2026, 03:50 PM",
-    customerName: "Mona Kassem",
+    customerName: "Destination Picker", // demo: manual rollover with merchant-chosen destination, multi-source + undo
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1993-0123456-0",
     instrumentType: "Bank Account",
@@ -794,5 +794,42 @@ export const directDebitContracts: DirectDebitContract[] = [
       5: { status: "Scheduled", amount: 8000, rolledOverFrom: [4], note: "Includes AED 4,000.00 carried over from 10 Apr 2026 (occurrence #4)." },
       6: { status: "Scheduled" },
     }),
+  },
+  // dd11 — new (Sep 2026): To Be Filled By Customer (TBFC). Merchant left instrument details
+  // blank; Geidea holds the contract/subscription/occurrence schedule locally only — Create DDA
+  // is not called, so no DDS mandate reference exists yet. See Notes/Projects/Direct Debit.md,
+  // "To Be Filled By Customer (TBFC) instrument flow." Opening this contract's Sign link (or its
+  // Detail screen) is how a fresh session can see the awaiting-instrument state without having
+  // to create one by hand.
+  {
+    id: "dd11",
+    ref: "", // no DDS reference yet — see PENDING_INSTRUMENT_REF_LABEL
+    merchantRef: "INV-2026-08890",
+    notes: "TBFC demo — instrument deferred to customer's own review-and-sign step",
+    contractDescription: "Monthly gym membership fee collection.",
+    createdOn: "08 Sep 2026, 04:20 PM",
+    customerName: "Awaiting Instrument", // demo: TBFC — bank details not yet supplied by the customer
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1994-1122334-4",
+    instrumentType: "Bank Account", // fixed under TBFC — Credit Card excluded (see Direct Debit.md, PCI discussion)
+    maskedInstrumentRef: "", // not yet supplied
+    commencesOn: "15 Sep 2026",
+    expiresOn: "15 Sep 2027", // 12 monthly occurrences once the customer completes their step
+    frequency: "Monthly",
+    amountType: "Fixed",
+    minAmount: 250,
+    maxAmount: 250,
+    rolloverEnabled: false,
+    rolloversAllowed: 0,
+    rolloverRemaining: 0,
+    status: "Awaiting Customer Details",
+    subscriptionStatus: "Active",
+    instrumentProvidedBy: "customer",
+    mandateCreationStage: "awaiting_customer_instrument",
+    awaitingInstrumentNote:
+      "Waiting on the customer to supply their bank account details on the contract sign page before this mandate can be submitted to DDS. Nothing has been sent to DDS yet — no reference exists until that step completes.",
+    // Schedule generated and held locally so the customer's review page has something to show —
+    // per the confirmed design, Subscription/Occurrence creation isn't gated on a dda_id existing.
+    occurrences: genOccurrences("2026-09-15", "Monthly", 12, 250),
   },
 ];
