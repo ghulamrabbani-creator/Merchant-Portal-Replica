@@ -284,7 +284,7 @@ export default function DirectDebitPage() {
           <thead>
             <tr className="border-b border-border-color text-left text-text-secondary">
               <th className="w-10 px-4 py-3" />
-              <th className="px-4 py-3 font-medium">Contract Ref</th>
+              <th className="px-4 py-3 font-medium">Merchant Reference</th>
               <th className="px-4 py-3 font-medium">Customer Name</th>
               <th className="px-3 py-3 font-medium">Instrument</th>
               <th className="px-4 py-3 font-medium">Validity</th>
@@ -326,7 +326,7 @@ export default function DirectDebitPage() {
                         href={`/direct-debit/${c.id}`}
                         className="font-medium text-brand-blue hover:underline"
                       >
-                        {c.ref}
+                        {c.merchantRef}
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-text-primary">{c.customerName}</td>
