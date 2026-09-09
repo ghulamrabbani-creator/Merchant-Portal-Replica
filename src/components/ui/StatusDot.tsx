@@ -15,6 +15,7 @@ const colorMap: Record<string, string> = {
   Active: "bg-status-approved",
   Suspended: "bg-status-declined",
   Rejected: "bg-status-declined",
+  "Awaiting Customer Details": "bg-status-pending",
   "Pending Customer Sign": "bg-status-pending",
   "Pending Bank Approval": "bg-status-pending",
   Processed: "bg-status-completed",
