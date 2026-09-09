@@ -20,11 +20,16 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
     found?.mandateCreationStage === "awaiting_customer_instrument" ? "instrument" : "review"
   );
 
-  // TBFC instrument-capture form state — reuses the same bank-detail field set and validation
-  // rules already used in the merchant-entered path (CreateDirectDebitContractModal Step 1).
+  // TBFC instrument-capture form state — reuses the same field sets and validation rules already
+  // used in the merchant-entered path (CreateDirectDebitContractModal Step 1). Which set applies
+  // is the merchant's own choice (contract.instrumentType), made when they created the contract —
+  // only the account/card details themselves are deferred to the customer here.
   const [instBankName, setInstBankName] = useState<string>(DDS_BANKS[0]);
   const [instAccountHolderTitle, setInstAccountHolderTitle] = useState(found?.customerName ?? "");
   const [instIban, setInstIban] = useState("");
+  const [instCardHolderName, setInstCardHolderName] = useState(found?.customerName ?? "");
+  const [instIssuingBank, setInstIssuingBank] = useState<string>(DDS_BANKS[0]);
+  const [instCardNumber, setInstCardNumber] = useState("");
 
   useEffect(() => {
     if (!found) return;
@@ -53,13 +58,23 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
   function handleSubmitInstrument() {
     const target = directDebitContracts.find((x) => x.id === id);
     if (!target) return;
-    target.bankName = instBankName;
-    target.maskedInstrumentRef = maskInstrumentRef(instIban);
+    if (target.instrumentType === "Bank Account") {
+      target.bankName = instBankName;
+      target.maskedInstrumentRef = maskInstrumentRef(instIban);
+    } else {
+      target.bankName = instIssuingBank;
+      target.maskedInstrumentRef = maskInstrumentRef(instCardNumber);
+    }
     target.ref = nextContractRef(directDebitContracts);
     target.mandateCreationStage = "submitted_to_dds";
     target.status = "Pending Customer Sign";
     setStep("review");
   }
+
+  const instrumentValid =
+    c.instrumentType === "Bank Account"
+      ? instIban.trim() && instAccountHolderTitle.trim()
+      : instCardNumber.trim() && instCardHolderName.trim();
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-page-bg">
@@ -180,45 +195,89 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
           {step === "instrument" && (
             <div className="text-left">
               <p className="mb-4 text-center text-sm text-text-secondary">
-                {STORE_NAME} left your bank account details for you to provide. Enter them below to continue —
-                this contract won&apos;t be submitted for approval until you do.
+                {STORE_NAME} left your {c.instrumentType.toLowerCase()} details for you to provide. Enter them
+                below to continue — this contract won&apos;t be submitted for approval until you do.
               </p>
-              <div className="mb-3.5">
-                <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">Bank name</label>
-                <select
-                  value={instBankName}
-                  onChange={(e) => setInstBankName(e.target.value)}
-                  className="w-full rounded-lg border border-border-color bg-white px-3 py-2.5 text-sm outline-none"
-                >
-                  {DDS_BANKS.map((bank) => (
-                    <option key={bank} value={bank}>
-                      {bank}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="mb-3.5">
-                <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">
-                  Account holder title
-                </label>
-                <input
-                  value={instAccountHolderTitle}
-                  onChange={(e) => setInstAccountHolderTitle(e.target.value)}
-                  className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
-                />
-              </div>
-              <div className="mb-5">
-                <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">IBAN</label>
-                <input
-                  value={instIban}
-                  onChange={(e) => setInstIban(e.target.value)}
-                  placeholder="AE07 0331 2345 6789 0123 456"
-                  className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
-                />
-              </div>
+              {c.instrumentType === "Bank Account" ? (
+                <>
+                  <div className="mb-3.5">
+                    <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">Bank name</label>
+                    <select
+                      value={instBankName}
+                      onChange={(e) => setInstBankName(e.target.value)}
+                      className="w-full rounded-lg border border-border-color bg-white px-3 py-2.5 text-sm outline-none"
+                    >
+                      {DDS_BANKS.map((bank) => (
+                        <option key={bank} value={bank}>
+                          {bank}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="mb-3.5">
+                    <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">
+                      Account holder title
+                    </label>
+                    <input
+                      value={instAccountHolderTitle}
+                      onChange={(e) => setInstAccountHolderTitle(e.target.value)}
+                      className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                    />
+                  </div>
+                  <div className="mb-5">
+                    <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">IBAN</label>
+                    <input
+                      value={instIban}
+                      onChange={(e) => setInstIban(e.target.value)}
+                      placeholder="AE07 0331 2345 6789 0123 456"
+                      className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mb-3.5">
+                    <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">
+                      Card holder name
+                    </label>
+                    <input
+                      value={instCardHolderName}
+                      onChange={(e) => setInstCardHolderName(e.target.value)}
+                      className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                    />
+                  </div>
+                  <div className="mb-3.5">
+                    <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">
+                      Issuing bank
+                    </label>
+                    <select
+                      value={instIssuingBank}
+                      onChange={(e) => setInstIssuingBank(e.target.value)}
+                      className="w-full rounded-lg border border-border-color bg-white px-3 py-2.5 text-sm outline-none"
+                    >
+                      {DDS_BANKS.map((bank) => (
+                        <option key={bank} value={bank}>
+                          {bank}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="mb-5">
+                    <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">
+                      Card number
+                    </label>
+                    <input
+                      value={instCardNumber}
+                      onChange={(e) => setInstCardNumber(e.target.value)}
+                      placeholder="4242 4242 4242 4242"
+                      className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                    />
+                  </div>
+                </>
+              )}
               <button
                 onClick={handleSubmitInstrument}
-                disabled={!instIban.trim() || !instAccountHolderTitle.trim()}
+                disabled={!instrumentValid}
                 className="w-full rounded-lg bg-brand-blue px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Continue to Review &amp; Sign
