@@ -811,7 +811,10 @@ export const directDebitContracts: DirectDebitContract[] = [
     customerName: "Awaiting Instrument", // demo: TBFC — bank details not yet supplied by the customer
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1994-1122334-4",
-    instrumentType: "Bank Account", // fixed under TBFC — Credit Card excluded (see Direct Debit.md, PCI discussion)
+    // Merchant still chooses the instrument TYPE up front even under TBFC (Rabbani, 09-Sep-2026:
+    // encryption is a backend concern with no FE representation) — only the account/card details
+    // themselves are deferred to the customer, captured on the Sign page's instrument step.
+    instrumentType: "Bank Account",
     maskedInstrumentRef: "", // not yet supplied
     commencesOn: "15 Sep 2026",
     expiresOn: "15 Sep 2027", // 12 monthly occurrences once the customer completes their step
