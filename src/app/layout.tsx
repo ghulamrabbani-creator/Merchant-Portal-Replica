@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
+import ChangeLogBar from "@/components/layout/ChangeLogBar";
 
 export const metadata: Metadata = {
   title: "Geidea Merchant Portal — Design Reference",
@@ -15,13 +16,16 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="flex h-full min-h-screen">
-        <Sidebar />
-        <div className="flex min-h-screen flex-1 flex-col">
-          <Topbar />
-          <main className="flex-1 overflow-y-auto bg-page-bg px-8 py-8">
-            {children}
-          </main>
+      <body className="flex h-full min-h-screen flex-col">
+        <ChangeLogBar />
+        <div className="flex min-h-0 flex-1">
+          <Sidebar />
+          <div className="flex min-h-screen flex-1 flex-col">
+            <Topbar />
+            <main className="flex-1 overflow-y-auto bg-page-bg px-8 py-8">
+              {children}
+            </main>
+          </div>
         </div>
       </body>
     </html>
