@@ -100,7 +100,7 @@ export default function Sidebar() {
 
   if (collapsed) {
     return (
-      <aside className="flex h-screen w-[76px] shrink-0 flex-col justify-between bg-sidebar-bg px-3 py-6">
+      <aside className="flex h-full w-[76px] shrink-0 flex-col justify-between bg-sidebar-bg px-3 py-6">
         <div>
           <div className="mb-8 flex justify-center">
             <div className="h-8 w-8 rounded bg-brand-orange" />
@@ -137,7 +137,7 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="flex h-screen w-[260px] shrink-0 flex-col justify-between bg-sidebar-bg px-4 py-6">
+    <aside className="flex h-full w-[260px] shrink-0 flex-col justify-between bg-sidebar-bg px-4 py-6">
       <div>
         <div className="mb-8 flex items-center gap-2 px-2">
           <span className="text-2xl font-extrabold tracking-tight text-brand-orange">
