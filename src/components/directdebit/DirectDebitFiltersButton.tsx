@@ -7,6 +7,7 @@ import Modal from "@/components/ui/Modal";
 
 const STATUSES: [string, string][] = [
   ["Active", "bg-status-approved"],
+  ["Awaiting Customer Details", "bg-status-pending"],
   ["Pending Customer Sign", "bg-status-pending"],
   ["Pending Bank Approval", "bg-status-pending"],
   ["Suspended", "bg-status-declined"],
