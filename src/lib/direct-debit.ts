@@ -129,6 +129,13 @@ export function minGapDays(frequency: DDFrequency): number {
   return Math.max(1, Math.round((FREQ_MONTHS[frequency] || 1) * 30) - 4);
 }
 
+// ---- TBFC (To Be Filled By Customer) helpers (added Sep 2026) ----
+
+/** Shown wherever the DDS mandate reference or instrument would normally appear, for a
+ *  contract still in the `awaiting_customer_instrument` stage — Create DDA hasn't been called
+ *  yet, so DDS has issued nothing to show. See Notes/Projects/Direct Debit.md, TBFC section. */
+export const PENDING_INSTRUMENT_REF_LABEL = "Not yet issued — awaiting customer details";
+
 export function formatMoneyAED(amount: number): string {
   return `AED ${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
