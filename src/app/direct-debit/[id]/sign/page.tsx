@@ -7,6 +7,7 @@ import clsx from "clsx";
 import { directDebitContracts, STORE_NAME } from "@/lib/mock-data";
 import { formatMoneyAED, maskInstrumentRef, nextContractRef, PENDING_INSTRUMENT_REF_LABEL } from "@/lib/direct-debit";
 import { DDInstrumentType, DDS_BANKS } from "@/lib/types";
+import { useDDConfig } from "@/lib/dd-config-context";
 
 // "instrument" (added Sep 2026, TBFC): inserted before "review" when the merchant left
 // instrument details for the customer to supply — see Notes/Projects/Direct Debit.md, "To Be
@@ -17,6 +18,7 @@ type SignStep = "instrument" | "review" | "fetching" | "unsigned" | "signing" | 
 export default function ContractSignPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const found = directDebitContracts.find((c) => c.id === id);
+  const { config } = useDDConfig();
   const [step, setStep] = useState<SignStep>(
     found?.mandateCreationStage === "awaiting_customer_instrument" ? "instrument" : "review"
   );
@@ -34,6 +36,13 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
   const [instCardHolderName, setInstCardHolderName] = useState(found?.customerName ?? "");
   const [instIssuingBank, setInstIssuingBank] = useState<string>(DDS_BANKS[0]);
   const [instCardNumber, setInstCardNumber] = useState("");
+
+  // Disable Credit Card Instrument (PGW Config in MA, Sep 2026): derived, not synced via effect —
+  // matches the same approach in CreateDirectDebitContractModal. Falls back to Bank Account for
+  // every read if switched on mid-session while Credit Card was already selected here.
+  const effectiveCustInstrumentType: DDInstrumentType = config.disableCreditCard
+    ? "Bank Account"
+    : custInstrumentType;
 
   useEffect(() => {
     if (!found) return;
@@ -62,8 +71,8 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
   function handleSubmitInstrument() {
     const target = directDebitContracts.find((x) => x.id === id);
     if (!target) return;
-    target.instrumentType = custInstrumentType;
-    if (custInstrumentType === "Bank Account") {
+    target.instrumentType = effectiveCustInstrumentType;
+    if (effectiveCustInstrumentType === "Bank Account") {
       target.bankName = instBankName;
       target.maskedInstrumentRef = maskInstrumentRef(instIban);
     } else {
@@ -77,7 +86,7 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
   }
 
   const instrumentValid =
-    custInstrumentType === "Bank Account"
+    effectiveCustInstrumentType === "Bank Account"
       ? instIban.trim() && instAccountHolderTitle.trim()
       : instCardNumber.trim() && instCardHolderName.trim();
 
@@ -200,40 +209,44 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
           {step === "instrument" && (
             <div className="text-left">
               <p className="mb-4 text-center text-sm text-text-secondary">
-                {STORE_NAME} has left the payment instrument for this contract up to you. Choose an account
-                type and enter its details below to continue — this contract won&apos;t be submitted for
-                approval until you do.
+                {STORE_NAME} has left the payment instrument for this contract up to you.{" "}
+                {config.disableCreditCard
+                  ? "Enter your bank account details below to continue"
+                  : "Choose an account type and enter its details below to continue"}{" "}
+                — this contract won&apos;t be submitted for approval until you do.
               </p>
 
               <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">
                 Payment instrument
               </label>
-              <div className="mb-4 flex rounded-xl bg-page-bg p-1">
-                <button
-                  onClick={() => setCustInstrumentType("Bank Account")}
-                  className={clsx(
-                    "flex-1 rounded-lg py-2.5 text-center text-sm font-semibold",
-                    custInstrumentType === "Bank Account"
-                      ? "cursor-pointer bg-brand-orange text-white"
-                      : "cursor-pointer text-text-secondary"
-                  )}
-                >
-                  Bank Account
-                </button>
-                <button
-                  onClick={() => setCustInstrumentType("Credit Card")}
-                  className={clsx(
-                    "flex-1 rounded-lg py-2.5 text-center text-sm font-semibold",
-                    custInstrumentType === "Credit Card"
-                      ? "cursor-pointer bg-brand-orange text-white"
-                      : "cursor-pointer text-text-secondary"
-                  )}
-                >
-                  Credit Card
-                </button>
-              </div>
+              {!config.disableCreditCard && (
+                <div className="mb-4 flex rounded-xl bg-page-bg p-1">
+                  <button
+                    onClick={() => setCustInstrumentType("Bank Account")}
+                    className={clsx(
+                      "flex-1 rounded-lg py-2.5 text-center text-sm font-semibold",
+                      custInstrumentType === "Bank Account"
+                        ? "cursor-pointer bg-brand-orange text-white"
+                        : "cursor-pointer text-text-secondary"
+                    )}
+                  >
+                    Bank Account
+                  </button>
+                  <button
+                    onClick={() => setCustInstrumentType("Credit Card")}
+                    className={clsx(
+                      "flex-1 rounded-lg py-2.5 text-center text-sm font-semibold",
+                      custInstrumentType === "Credit Card"
+                        ? "cursor-pointer bg-brand-orange text-white"
+                        : "cursor-pointer text-text-secondary"
+                    )}
+                  >
+                    Credit Card
+                  </button>
+                </div>
+              )}
 
-              {custInstrumentType === "Bank Account" ? (
+              {effectiveCustInstrumentType === "Bank Account" ? (
                 <>
                   <div className="mb-3.5">
                     <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">Bank name</label>
