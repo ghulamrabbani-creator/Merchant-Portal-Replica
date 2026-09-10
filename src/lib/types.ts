@@ -298,7 +298,12 @@ export interface DirectDebitContract {
   customerName: string;
   customerIdType: string; // e.g. "Emirates ID"
   customerIdNumber: string;
-  instrumentType: DDInstrumentType;
+  /** Absent only while instrumentProvidedBy === "customer" and the customer hasn't reached the
+   *  Sign page's instrument step yet (Rabbani, 09-Sep-2026: under TBFC the WHOLE instrument
+   *  choice — type included, not just the account/card details — is the customer's to make, not
+   *  the merchant's; the merchant makes no instrument decision at all when TBFC is checked). Set
+   *  the moment the customer submits that step, same as every other instrument field. */
+  instrumentType?: DDInstrumentType;
   bankName?: string; // Bank Account only
   maskedInstrumentRef: string; // masked IBAN or card, e.g. "•••1095"
   commencesOn: string; // "05 Sep 2026" — mandate validity start
