@@ -15,22 +15,37 @@ export interface ChangelogEntry {
   description: string;
 }
 
-export const LAST_UPDATED = "09 Sep 2026";
+export const LAST_UPDATED = "10 Sep 2026 (2)";
 
 // Full history below covers Direct Debit specifically, back to its first release on the portal
 // (01 Sep 2026) — compiled 09 Sep 2026 from the repo's commit history across every session so far.
 // Only shipped, user-visible features/changes are listed here; internal notes, refactors with no
 // behavior change, and lint/build fixes are deliberately left out.
+//
+// Housekeeping note (10-Sep-2026): the two entries directly below were found reverted to describe
+// the pre-correction "merchant still picks the type" behavior — likely lost in a manual tidy-up
+// pass on GitHub. Corrected back to match the actual shipped code (customer picks under TBFC,
+// confirmed live by Rabbani on 10-Sep-2026) rather than silently left stale.
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    date: "09 Sep 2026",
+    date: "10 Sep 2026",
     description:
-      "Direct Debit TBFC: added a second demo contract (Credit Card) so both instrument types are reachable from the Contract List — the only prior TBFC demo record was Bank Account, which made the Sign page's credit-card fields (card holder name, issuing bank, card number) impossible to see without hand-building a new contract.",
+      "Direct Debit: PGW Config in MA and DD BE Config now persist to this browser's localStorage instead of resetting on refresh — the prior in-memory-only behavior made a couple of the demo scenarios (Disable Credit Card, Bulk Upload) hard to show since any refresh silently reverted them. Each modal now has a \"Reset to defaults\" link to clear the persisted config on demand. Hydration is SSR-safe (defaults render first, then the persisted value loads in a mount effect) so there's no server/client mismatch. Note: DD BE Config's password and encryption key are stored in plaintext in localStorage — acceptable for this dev-reference tool, flagged here for visibility.",
+  },
+  {
+    date: "10 Sep 2026",
+    description:
+      "Direct Debit: added the \"PGW Config in MA\" and \"DD BE Config\" screens, reachable as buttons in the top ChangeLogBar (functional build of the wireframe iterated with Rabbani). PGW Config in MA covers Enable Direct Debit (Sidebar visibility), OIC choice (Geidea/Merchant — config-only, not wired to any visible behavior yet), Disable Credit Card Instrument, Enable Bulk Contract Upload, and Maximum Contract Amount. Toggling Disable Credit Card now actually removes Credit Card from both the contract-creation instrument picker and the customer's TBFC step; Enable Bulk Contract Upload adds a \"Bulk Upload\" button (coming-soon placeholder) next to \"+ Add Contract\" on the Contract List. All config lives in a new DDConfigContext — in-memory only, same reset-on-reload pattern as the rest of this prototype.",
   },
   {
     date: "09 Sep 2026",
     description:
-      "Direct Debit TBFC: the merchant still picks Bank Account vs Credit Card up front — only the account/card details themselves are deferred to the customer. (Encryption is handled backend-side; no field-level representation needed here.)",
+      "Direct Debit TBFC: corrected — the ENTIRE instrument decision (which type, not just its account/card details) is the customer's to make, not the merchant's. The merchant makes no instrument choice at all when TBFC is checked; the customer gets the same Bank Account / Credit Card selector the merchant used to see, on the Sign page's instrument step.",
+  },
+  {
+    date: "09 Sep 2026",
+    description:
+      "Direct Debit TBFC: added a second demo contract (Credit Card) so both instrument types are reachable from the Contract List — the only prior TBFC demo record was Bank Account, which made the Sign page's credit-card fields (card holder name, issuing bank, card number) impossible to see without hand-building a new contract. (Removed again the same day — one demo record now covers both, since the customer picks the type live.)",
   },
   {
     date: "09 Sep 2026",
