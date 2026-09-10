@@ -42,10 +42,13 @@ export default function CreateDirectDebitContractModal({
   const [step, setStep] = useState<Step>(1);
   const [maxStepReached, setMaxStepReached] = useState<Step>(1);
 
+  // Only used when !tbfc — the merchant's own instrument choice. Under TBFC the customer makes
+  // this choice instead, on the Sign page's instrument step (Rabbani, 09-Sep-2026: the whole
+  // instrument decision — type included, not just the account/card details — is the customer's
+  // to make once TBFC is checked; see instrumentType being left unset in that case below).
   const [instrumentType, setInstrumentType] = useState<DDInstrumentType>("Bank Account");
-  // TBFC (To Be Filled By Customer, added Sep 2026): merchant defers instrument details to the
-  // customer's own review-and-sign step. Restricted to Bank Account — see Direct Debit.md's PCI
-  // discussion for why Credit Card is excluded under TBFC.
+  // TBFC (To Be Filled By Customer, added Sep 2026): merchant defers the ENTIRE instrument
+  // decision — which type, and its details — to the customer's own review-and-sign step.
   const [tbfc, setTbfc] = useState(false);
   const [amountType, setAmountType] = useState<DDAmountType>("Variable");
   const [frequencyCeiling, setFrequencyCeiling] = useState<DDFrequency>("Monthly");
@@ -223,10 +226,10 @@ export default function CreateDirectDebitContractModal({
       customerName,
       customerIdType: "Emirates ID",
       customerIdNumber,
-      // Instrument TYPE is still chosen by the merchant under TBFC — only the actual account/card
-      // details are deferred to the customer (encryption of those details is a backend concern,
-      // with no field-level representation needed here).
-      instrumentType,
+      // Under TBFC the customer picks the instrument TYPE too (not just its details) on the Sign
+      // page's instrument step — left unset here rather than defaulting to the merchant's unused
+      // pill selection, so the UI can tell "not yet chosen" apart from an actual choice.
+      instrumentType: tbfc ? undefined : instrumentType,
       bankName: tbfc ? undefined : bankActive ? bankName : issuingBank,
       maskedInstrumentRef: tbfc ? "" : maskInstrumentRef(bankActive ? iban : cardNumber),
       commencesOn: formatDateNice(parseDateStr(commencesOn)),
@@ -244,7 +247,7 @@ export default function CreateDirectDebitContractModal({
       instrumentProvidedBy: tbfc ? "customer" : "merchant",
       mandateCreationStage: tbfc ? "awaiting_customer_instrument" : "submitted_to_dds",
       awaitingInstrumentNote: tbfc
-        ? `Waiting on the customer to supply their ${instrumentType.toLowerCase()} details on the contract sign page before this mandate can be submitted to DDS. Nothing has been sent to DDS yet — no reference exists until that step completes.`
+        ? "Waiting on the customer to choose a payment instrument (bank account or credit card) and supply its details on the contract sign page before this mandate can be submitted to DDS. Nothing has been sent to DDS yet — no reference exists until that step completes."
         : undefined,
       occurrences,
     };
@@ -393,23 +396,23 @@ export default function CreateDirectDebitContractModal({
                 <div>
                   <div className="text-[13px] font-medium text-text-primary">To Be Filled By Customer</div>
                   <div className="mt-0.5 text-[11.5px] text-text-muted">
-                    Leave instrument details to the customer — they&apos;ll supply them on their own review-and-sign
-                    step. Choose which instrument below; Create DDA isn&apos;t called until they complete that step.
+                    Leave the instrument entirely to the customer — they&apos;ll choose Bank Account or Credit
+                    Card and supply its details on their own review-and-sign step. Create DDA isn&apos;t called
+                    until they complete that step.
                   </div>
                 </div>
               </div>
 
-              <div className="mb-4 flex rounded-xl bg-page-bg p-1">
-                <button onClick={() => setInstrumentType("Bank Account")} className={bankActive ? pillActive : pillInactive}>
-                  Bank Account
-                </button>
-                <button onClick={() => setInstrumentType("Credit Card")} className={!bankActive ? pillActive : pillInactive}>
-                  Credit Card
-                </button>
-              </div>
-
               {!tbfc ? (
                 <>
+                  <div className="mb-4 flex rounded-xl bg-page-bg p-1">
+                    <button onClick={() => setInstrumentType("Bank Account")} className={bankActive ? pillActive : pillInactive}>
+                      Bank Account
+                    </button>
+                    <button onClick={() => setInstrumentType("Credit Card")} className={!bankActive ? pillActive : pillInactive}>
+                      Credit Card
+                    </button>
+                  </div>
                   {bankActive ? (
                     <div key="bank-account-fields" className="mb-4 grid grid-cols-2 gap-3.5">
                       <div>
@@ -482,8 +485,8 @@ export default function CreateDirectDebitContractModal({
                 </>
               ) : (
                 <div className="mb-4 rounded-lg border border-dashed border-border-color px-3.5 py-3 text-[12.5px] text-text-muted">
-                  {instrumentSummary} details will be collected from the customer on the contract sign page —
-                  nothing to enter here.
+                  The customer will choose Bank Account or Credit Card and provide its details on the contract
+                  sign page — nothing to enter here.
                 </div>
               )}
 
@@ -772,10 +775,7 @@ export default function CreateDirectDebitContractModal({
                   value={contractDescription.trim() || "Not set — customer will only see your company name"}
                 />
                 {tbfc ? (
-                  <>
-                    <ReviewRow label="Payment instrument" value={instrumentSummary} />
-                    <ReviewRow label={bankActive ? "IBAN" : "Card number"} value="To be completed by customer" />
-                  </>
+                  <ReviewRow label="Payment instrument" value="To be chosen and completed by customer" />
                 ) : (
                   <>
                     <ReviewRow label="Payment instrument" value={instrumentSummary} />
@@ -827,7 +827,7 @@ export default function CreateDirectDebitContractModal({
                 )}
                 <SummaryRow
                   label="Instrument"
-                  value={tbfc ? `${instrumentSummary} (filled by customer)` : instrumentSummary}
+                  value={tbfc ? "Chosen by customer" : instrumentSummary}
                 />
                 <SummaryRow label="Amount type" value={amountTypeSummary} />
                 <SummaryRow label="Frequency" value={panelFrequency} />
