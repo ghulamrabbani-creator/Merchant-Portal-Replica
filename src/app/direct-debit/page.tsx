@@ -2,15 +2,17 @@
 
 import { Fragment, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, Plus, Landmark, CreditCard, HelpCircle, MoreVertical, RotateCw, Undo2 } from "lucide-react";
+import { ChevronDown, Plus, UploadCloud, Landmark, CreditCard, HelpCircle, MoreVertical, RotateCw, Undo2 } from "lucide-react";
 import clsx from "clsx";
 import PageHeader from "@/components/ui/PageHeader";
 import SearchBar from "@/components/ui/SearchBar";
 import ExportButton from "@/components/ui/ExportButton";
 import StatCard from "@/components/ui/StatCard";
 import StatusDot from "@/components/ui/StatusDot";
+import Modal from "@/components/ui/Modal";
 import DirectDebitFiltersButton from "@/components/directdebit/DirectDebitFiltersButton";
 import CreateDirectDebitContractModal from "@/components/directdebit/CreateDirectDebitContractModal";
+import { useDDConfig } from "@/lib/dd-config-context";
 import { directDebitContracts } from "@/lib/mock-data";
 import {
   formatMoneyAED,
@@ -35,6 +37,8 @@ function collectionSummary(occurrences: DirectDebitOccurrence[]) {
 export default function DirectDebitPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
+  const { config } = useDDConfig();
 
   // Local, in-memory copy of each contract's occurrences, keyed by contract id, so Retry /
   // Rollover / Undo rollover on the List screen's expand-row can update the view without
@@ -267,6 +271,15 @@ export default function DirectDebitPage() {
             <Plus size={16} />
             Add Contract
           </button>
+          {config.enableBulkUpload && (
+            <button
+              onClick={() => setBulkUploadOpen(true)}
+              className="flex items-center gap-2 rounded-lg border border-brand-blue px-[18px] py-2.5 text-sm font-semibold text-brand-blue hover:bg-brand-blue/5"
+            >
+              <UploadCloud size={16} />
+              Bulk Upload
+            </button>
+          )}
         </div>
       </div>
 
@@ -484,6 +497,26 @@ export default function DirectDebitPage() {
       </div>
 
       <CreateDirectDebitContractModal open={createOpen} onClose={() => setCreateOpen(false)} />
+
+      <Modal open={bulkUploadOpen} onClose={() => setBulkUploadOpen(false)}>
+        <div className="p-8">
+          <h2 className="mb-2 text-xl font-bold text-text-primary">Bulk Contract Upload — not yet available</h2>
+          <p className="mb-6 text-sm text-text-secondary">
+            Bulk Contract Creation is still being designed — this button is wired up per the
+            Enable Bulk Contract Upload toggle in PGW Config in MA, but the upload flow itself
+            (file format, maker/checker review, TBFC interaction) isn&apos;t built yet. Placeholder
+            for that flow, same pattern as Cancel mandate on Contract Detail.
+          </p>
+          <div className="flex justify-end">
+            <button
+              onClick={() => setBulkUploadOpen(false)}
+              className="rounded-lg bg-brand-blue px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-blue-hover"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
