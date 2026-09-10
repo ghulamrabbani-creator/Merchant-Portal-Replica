@@ -3,9 +3,10 @@
 import { use, useEffect, useState } from "react";
 import { notFound } from "next/navigation";
 import { Landmark, CreditCard, ShieldCheck, CheckCircle2, Loader2, FileText } from "lucide-react";
+import clsx from "clsx";
 import { directDebitContracts, STORE_NAME } from "@/lib/mock-data";
 import { formatMoneyAED, maskInstrumentRef, nextContractRef, PENDING_INSTRUMENT_REF_LABEL } from "@/lib/direct-debit";
-import { DDS_BANKS } from "@/lib/types";
+import { DDInstrumentType, DDS_BANKS } from "@/lib/types";
 
 // "instrument" (added Sep 2026, TBFC): inserted before "review" when the merchant left
 // instrument details for the customer to supply — see Notes/Projects/Direct Debit.md, "To Be
@@ -20,10 +21,13 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
     found?.mandateCreationStage === "awaiting_customer_instrument" ? "instrument" : "review"
   );
 
-  // TBFC instrument-capture form state — reuses the same field sets and validation rules already
-  // used in the merchant-entered path (CreateDirectDebitContractModal Step 1). Which set applies
-  // is the merchant's own choice (contract.instrumentType), made when they created the contract —
-  // only the account/card details themselves are deferred to the customer here.
+  // TBFC instrument-capture form state. Corrected 09-Sep-2026 (Rabbani): under TBFC the whole
+  // instrument choice — which TYPE, not just its account/card details — belongs to the customer,
+  // not the merchant. The merchant makes no instrument decision at all when TBFC is checked (see
+  // contract.instrumentType being left unset in that case, in types.ts), so the type picker below
+  // mirrors CreateDirectDebitContractModal's own Step 1 pill selector, just on this side of the
+  // hand-off. Defaults to Bank Account the same way the merchant-side picker does.
+  const [custInstrumentType, setCustInstrumentType] = useState<DDInstrumentType>("Bank Account");
   const [instBankName, setInstBankName] = useState<string>(DDS_BANKS[0]);
   const [instAccountHolderTitle, setInstAccountHolderTitle] = useState(found?.customerName ?? "");
   const [instIban, setInstIban] = useState("");
@@ -58,7 +62,8 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
   function handleSubmitInstrument() {
     const target = directDebitContracts.find((x) => x.id === id);
     if (!target) return;
-    if (target.instrumentType === "Bank Account") {
+    target.instrumentType = custInstrumentType;
+    if (custInstrumentType === "Bank Account") {
       target.bankName = instBankName;
       target.maskedInstrumentRef = maskInstrumentRef(instIban);
     } else {
@@ -72,7 +77,7 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
   }
 
   const instrumentValid =
-    c.instrumentType === "Bank Account"
+    custInstrumentType === "Bank Account"
       ? instIban.trim() && instAccountHolderTitle.trim()
       : instCardNumber.trim() && instCardHolderName.trim();
 
@@ -195,10 +200,40 @@ export default function ContractSignPage({ params }: { params: Promise<{ id: str
           {step === "instrument" && (
             <div className="text-left">
               <p className="mb-4 text-center text-sm text-text-secondary">
-                {STORE_NAME} left your {c.instrumentType.toLowerCase()} details for you to provide. Enter them
-                below to continue — this contract won&apos;t be submitted for approval until you do.
+                {STORE_NAME} has left the payment instrument for this contract up to you. Choose an account
+                type and enter its details below to continue — this contract won&apos;t be submitted for
+                approval until you do.
               </p>
-              {c.instrumentType === "Bank Account" ? (
+
+              <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">
+                Payment instrument
+              </label>
+              <div className="mb-4 flex rounded-xl bg-page-bg p-1">
+                <button
+                  onClick={() => setCustInstrumentType("Bank Account")}
+                  className={clsx(
+                    "flex-1 rounded-lg py-2.5 text-center text-sm font-semibold",
+                    custInstrumentType === "Bank Account"
+                      ? "cursor-pointer bg-brand-orange text-white"
+                      : "cursor-pointer text-text-secondary"
+                  )}
+                >
+                  Bank Account
+                </button>
+                <button
+                  onClick={() => setCustInstrumentType("Credit Card")}
+                  className={clsx(
+                    "flex-1 rounded-lg py-2.5 text-center text-sm font-semibold",
+                    custInstrumentType === "Credit Card"
+                      ? "cursor-pointer bg-brand-orange text-white"
+                      : "cursor-pointer text-text-secondary"
+                  )}
+                >
+                  Credit Card
+                </button>
+              </div>
+
+              {custInstrumentType === "Bank Account" ? (
                 <>
                   <div className="mb-3.5">
                     <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">Bank name</label>
