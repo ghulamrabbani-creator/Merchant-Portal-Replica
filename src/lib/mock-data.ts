@@ -795,12 +795,16 @@ export const directDebitContracts: DirectDebitContract[] = [
       6: { status: "Scheduled" },
     }),
   },
-  // dd11 — new (Sep 2026): To Be Filled By Customer (TBFC). Merchant left instrument details
-  // blank; Geidea holds the contract/subscription/occurrence schedule locally only — Create DDA
+  // dd11 — To Be Filled By Customer (TBFC). Merchant leaves the ENTIRE instrument decision to the
+  // customer (Rabbani, 09-Sep-2026: type included, not just the account/card details — see
+  // instrumentType being left unset below, and the type picker on the Sign page's instrument
+  // step). Geidea holds the contract/subscription/occurrence schedule locally only — Create DDA
   // is not called, so no DDS mandate reference exists yet. See Notes/Projects/Direct Debit.md,
   // "To Be Filled By Customer (TBFC) instrument flow." Opening this contract's Sign link (or its
   // Detail screen) is how a fresh session can see the awaiting-instrument state without having
-  // to create one by hand.
+  // to create one by hand. (A second demo record, dd12, briefly existed to demo the credit-card
+  // side of the Sign page's instrument fields — removed once instrument TYPE moved to the
+  // customer's own choice, since either path is now reachable from this one record.)
   {
     id: "dd11",
     ref: "", // no DDS reference yet — see PENDING_INSTRUMENT_REF_LABEL
@@ -808,13 +812,10 @@ export const directDebitContracts: DirectDebitContract[] = [
     notes: "TBFC demo — instrument deferred to customer's own review-and-sign step",
     contractDescription: "Monthly gym membership fee collection.",
     createdOn: "08 Sep 2026, 04:20 PM",
-    customerName: "Awaiting Instrument", // demo: TBFC — bank details not yet supplied by the customer
+    customerName: "Awaiting Instrument", // demo: TBFC — no instrument chosen or supplied yet
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1994-1122334-4",
-    // Merchant still chooses the instrument TYPE up front even under TBFC (Rabbani, 09-Sep-2026:
-    // encryption is a backend concern with no FE representation) — only the account/card details
-    // themselves are deferred to the customer, captured on the Sign page's instrument step.
-    instrumentType: "Bank Account",
+    // instrumentType intentionally omitted — the customer hasn't chosen one yet (see types.ts).
     maskedInstrumentRef: "", // not yet supplied
     commencesOn: "15 Sep 2026",
     expiresOn: "15 Sep 2027", // 12 monthly occurrences once the customer completes their step
@@ -830,43 +831,9 @@ export const directDebitContracts: DirectDebitContract[] = [
     instrumentProvidedBy: "customer",
     mandateCreationStage: "awaiting_customer_instrument",
     awaitingInstrumentNote:
-      "Waiting on the customer to supply their bank account details on the contract sign page before this mandate can be submitted to DDS. Nothing has been sent to DDS yet — no reference exists until that step completes.",
+      "Waiting on the customer to choose a payment instrument (bank account or credit card) and supply its details on the contract sign page before this mandate can be submitted to DDS. Nothing has been sent to DDS yet — no reference exists until that step completes.",
     // Schedule generated and held locally so the customer's review page has something to show —
     // per the confirmed design, Subscription/Occurrence creation isn't gated on a dda_id existing.
     occurrences: genOccurrences("2026-09-15", "Monthly", 12, 250),
-  },
-  // dd12 — new (Sep 2026): same TBFC state as dd11, but the merchant picked Credit Card as the
-  // instrument type instead of Bank Account. Added after Rabbani caught that dd11 was the only
-  // TBFC demo record and it happened to be Bank Account, making the card-side of the Sign page's
-  // instrument step (card holder name / issuing bank / card number fields) unreachable without
-  // hand-building a new contract through the creation modal every time.
-  {
-    id: "dd12",
-    ref: "", // no DDS reference yet — see PENDING_INSTRUMENT_REF_LABEL
-    merchantRef: "INV-2026-08915",
-    notes: "TBFC demo — card details not yet supplied by the customer",
-    contractDescription: "Monthly software subscription fee collection.",
-    createdOn: "08 Sep 2026, 05:05 PM",
-    customerName: "Awaiting Card", // demo: TBFC — credit card details not yet supplied by the customer
-    customerIdType: "Emirates ID",
-    customerIdNumber: "784-1996-3344556-7",
-    instrumentType: "Credit Card",
-    maskedInstrumentRef: "", // not yet supplied
-    commencesOn: "18 Sep 2026",
-    expiresOn: "18 Sep 2027", // 12 monthly occurrences once the customer completes their step
-    frequency: "Monthly",
-    amountType: "Fixed",
-    minAmount: 99,
-    maxAmount: 99,
-    rolloverEnabled: false,
-    rolloversAllowed: 0,
-    rolloverRemaining: 0,
-    status: "Awaiting Customer Details",
-    subscriptionStatus: "Active",
-    instrumentProvidedBy: "customer",
-    mandateCreationStage: "awaiting_customer_instrument",
-    awaitingInstrumentNote:
-      "Waiting on the customer to supply their credit card details on the contract sign page before this mandate can be submitted to DDS. Nothing has been sent to DDS yet — no reference exists until that step completes.",
-    occurrences: genOccurrences("2026-09-18", "Monthly", 12, 99),
   },
 ];
