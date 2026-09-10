@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Modal from "@/components/ui/Modal";
 import { LAST_UPDATED, CHANGELOG } from "@/lib/changelog";
+import PGWConfigModal from "@/components/directdebit/PGWConfigModal";
+import DDBEConfigModal from "@/components/directdebit/DDBEConfigModal";
 
 // Dev-reference banner (added Sep 2026, Rabbani) — spans the full width above the portal's own
 // chrome (sidebar + Topbar) so it reads as meta-information about this build, not part of the
@@ -10,6 +12,8 @@ import { LAST_UPDATED, CHANGELOG } from "@/lib/changelog";
 // stand out from the portal's own visual language, not blend into it.
 export default function ChangeLogBar() {
   const [open, setOpen] = useState(false);
+  const [pgwConfigOpen, setPgwConfigOpen] = useState(false);
+  const [beConfigOpen, setBeConfigOpen] = useState(false);
 
   return (
     <>
@@ -21,6 +25,20 @@ export default function ChangeLogBar() {
           className="underline underline-offset-2 hover:text-red-300"
         >
           Change Log
+        </button>
+        <span className="text-red-400/40">|</span>
+        <button
+          onClick={() => setPgwConfigOpen(true)}
+          className="underline underline-offset-2 hover:text-red-300"
+        >
+          PGW Config in MA
+        </button>
+        <span className="text-red-400/40">|</span>
+        <button
+          onClick={() => setBeConfigOpen(true)}
+          className="underline underline-offset-2 hover:text-red-300"
+        >
+          DD BE Config
         </button>
       </div>
 
@@ -43,6 +61,19 @@ export default function ChangeLogBar() {
           </div>
         </div>
       </Modal>
+
+      {/* Mounted only while open (added 10-Sep-2026, alongside config persistence) — each modal
+          seeds local draft state (amountDraft / draft) from context on mount via useState's
+          one-time initializer. With PGWConfigModal/DDBEConfigModal always mounted, that
+          initializer ran once at page load, before the localStorage-persisted config resolved
+          (useSyncExternalStore's post-hydration correction), so the draft got permanently stuck
+          on the un-hydrated default. Mounting on open instead means the initializer runs at
+          click time, well after hydration has settled, so it always seeds from the real
+          current — and correctly persisted — config. */}
+      {pgwConfigOpen && (
+        <PGWConfigModal open={pgwConfigOpen} onClose={() => setPgwConfigOpen(false)} />
+      )}
+      {beConfigOpen && <DDBEConfigModal open={beConfigOpen} onClose={() => setBeConfigOpen(false)} />}
     </>
   );
 }
