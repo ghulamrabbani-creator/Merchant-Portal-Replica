@@ -15,8 +15,9 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
+import { useDDConfig } from "@/lib/dd-config-context";
 
-const navItems = [
+const allNavItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Transactions", href: "/transactions", icon: ArrowLeftRight },
   { label: "Payouts", href: "/payouts", icon: Briefcase },
@@ -97,6 +98,12 @@ function ExpandableSection({
 export default function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const { config } = useDDConfig();
+  // "Enable Direct Debit" in PGW Config in MA — off hides the menu item only (the /direct-debit
+  // route itself stays reachable if someone hits the URL directly; scope confirmed with Rabbani).
+  const navItems = config.featureEnabled
+    ? allNavItems
+    : allNavItems.filter((item) => item.href !== "/direct-debit");
 
   if (collapsed) {
     return (
