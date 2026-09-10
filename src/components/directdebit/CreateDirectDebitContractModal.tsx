@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X, ChevronDown, Check, AlertCircle, Pencil } from "lucide-react";
 import clsx from "clsx";
+import { useDDConfig } from "@/lib/dd-config-context";
 import {
   DD_FREQUENCIES,
   buildOccurrenceSchedule,
@@ -38,6 +39,7 @@ export default function CreateDirectDebitContractModal({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const { config } = useDDConfig();
 
   const [step, setStep] = useState<Step>(1);
   const [maxStepReached, setMaxStepReached] = useState<Step>(1);
@@ -50,6 +52,13 @@ export default function CreateDirectDebitContractModal({
   // TBFC (To Be Filled By Customer, added Sep 2026): merchant defers the ENTIRE instrument
   // decision — which type, and its details — to the customer's own review-and-sign step.
   const [tbfc, setTbfc] = useState(false);
+
+  // Disable Credit Card Instrument (PGW Config in MA, Sep 2026): derived, not synced via effect —
+  // if switched on mid-session while Credit Card was already selected, this falls back to Bank
+  // Account for every read of the instrument type without a second render pass.
+  const effectiveInstrumentType: DDInstrumentType = config.disableCreditCard
+    ? "Bank Account"
+    : instrumentType;
   const [amountType, setAmountType] = useState<DDAmountType>("Variable");
   const [frequencyCeiling, setFrequencyCeiling] = useState<DDFrequency>("Monthly");
   const [collectionFrequency, setCollectionFrequency] = useState<DDFrequency>("Monthly");
@@ -99,7 +108,7 @@ export default function CreateDirectDebitContractModal({
   const [acknowledged, setAcknowledged] = useState(true);
 
   const fixedActive = amountType === "Fixed";
-  const bankActive = instrumentType === "Bank Account";
+  const bankActive = effectiveInstrumentType === "Bank Account";
   const effectiveRolloverEnabled = rolloverEnabled && !fixedActive;
 
   // Estimate off Commences On until Step 2 (First Collection Date) has actually been reached —
@@ -229,7 +238,7 @@ export default function CreateDirectDebitContractModal({
       // Under TBFC the customer picks the instrument TYPE too (not just its details) on the Sign
       // page's instrument step — left unset here rather than defaulting to the merchant's unused
       // pill selection, so the UI can tell "not yet chosen" apart from an actual choice.
-      instrumentType: tbfc ? undefined : instrumentType,
+      instrumentType: tbfc ? undefined : effectiveInstrumentType,
       bankName: tbfc ? undefined : bankActive ? bankName : issuingBank,
       maskedInstrumentRef: tbfc ? "" : maskInstrumentRef(bankActive ? iban : cardNumber),
       commencesOn: formatDateNice(parseDateStr(commencesOn)),
@@ -405,14 +414,16 @@ export default function CreateDirectDebitContractModal({
 
               {!tbfc ? (
                 <>
-                  <div className="mb-4 flex rounded-xl bg-page-bg p-1">
-                    <button onClick={() => setInstrumentType("Bank Account")} className={bankActive ? pillActive : pillInactive}>
-                      Bank Account
-                    </button>
-                    <button onClick={() => setInstrumentType("Credit Card")} className={!bankActive ? pillActive : pillInactive}>
-                      Credit Card
-                    </button>
-                  </div>
+                  {!config.disableCreditCard && (
+                    <div className="mb-4 flex rounded-xl bg-page-bg p-1">
+                      <button onClick={() => setInstrumentType("Bank Account")} className={bankActive ? pillActive : pillInactive}>
+                        Bank Account
+                      </button>
+                      <button onClick={() => setInstrumentType("Credit Card")} className={!bankActive ? pillActive : pillInactive}>
+                        Credit Card
+                      </button>
+                    </div>
+                  )}
                   {bankActive ? (
                     <div key="bank-account-fields" className="mb-4 grid grid-cols-2 gap-3.5">
                       <div>
@@ -485,8 +496,9 @@ export default function CreateDirectDebitContractModal({
                 </>
               ) : (
                 <div className="mb-4 rounded-lg border border-dashed border-border-color px-3.5 py-3 text-[12.5px] text-text-muted">
-                  The customer will choose Bank Account or Credit Card and provide its details on the contract
-                  sign page — nothing to enter here.
+                  {config.disableCreditCard
+                    ? "The customer will provide their Bank Account details on the contract sign page — nothing to enter here."
+                    : "The customer will choose Bank Account or Credit Card and provide its details on the contract sign page — nothing to enter here."}
                 </div>
               )}
 
