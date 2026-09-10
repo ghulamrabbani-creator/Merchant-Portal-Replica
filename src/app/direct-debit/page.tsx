@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, Plus, Landmark, CreditCard, MoreVertical, RotateCw, Undo2 } from "lucide-react";
+import { ChevronDown, Plus, Landmark, CreditCard, HelpCircle, MoreVertical, RotateCw, Undo2 } from "lucide-react";
 import clsx from "clsx";
 import PageHeader from "@/components/ui/PageHeader";
 import SearchBar from "@/components/ui/SearchBar";
@@ -333,8 +333,11 @@ export default function DirectDebitPage() {
                     <td className="px-3 py-3 text-text-secondary">
                       {c.instrumentType === "Bank Account" ? (
                         <Landmark size={17} strokeWidth={1.7} />
-                      ) : (
+                      ) : c.instrumentType === "Credit Card" ? (
                         <CreditCard size={17} strokeWidth={1.7} />
+                      ) : (
+                        // TBFC, customer hasn't chosen an instrument yet — see types.ts
+                        <HelpCircle size={17} strokeWidth={1.7} className="text-text-muted/60" />
                       )}
                     </td>
                     <td className="px-4 py-3 text-text-secondary">
