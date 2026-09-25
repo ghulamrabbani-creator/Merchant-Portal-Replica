@@ -59,7 +59,41 @@ export interface DDMerchantConfig {
   // Ceiling on a single contract's max_amount for this merchant. Merchant-editable, unlike the
   // rest of this config which mostly toggles — kept as its own explicit Save in the UI.
   maxContractAmount: number;
+  // ---- Added 25-Sep-2026 — Backend Stories S1 §3/§4 ----
+  // min_first_collection_lead_working_days (default 4, 0–30): first collection must be at least
+  // this many working days after contract creation (S2 rule V15).
+  minFirstCollectionLeadWorkingDays: number;
+  // contract_review_expiry_days (default 7, 1–30): how long the customer's review link is valid.
+  contractReviewExpiryDays: number;
+  // suppress_customer_notifications (default false): Geidea sends NO SMS / email / WhatsApp to
+  // this merchant's customers — for partners that run their own frontend and messaging.
+  suppressCustomerNotifications: boolean;
+  // Per-action toggles (S1 §4), all default true. The Backend returns 403 ACTION_NOT_ALLOWED for
+  // an action whose toggle is off; the portal hides/disables the matching button.
+  actions: DDActionToggles;
 }
+
+export interface DDActionToggles {
+  allowCreateContract: boolean;
+  allowResendSigningLink: boolean;
+  allowDiscardContract: boolean;
+  allowPauseResume: boolean;
+  allowEditCollection: boolean;
+  allowRetryCollection: boolean;
+  allowCancelContract: boolean;
+  allowBulkUpload: boolean;
+}
+
+export const DEFAULT_ACTION_TOGGLES: DDActionToggles = {
+  allowCreateContract: true,
+  allowResendSigningLink: true,
+  allowDiscardContract: true,
+  allowPauseResume: true,
+  allowEditCollection: true,
+  allowRetryCollection: true,
+  allowCancelContract: true,
+  allowBulkUpload: true,
+};
 
 export interface DDBackendConfig {
   // API authentication between Geidea and DDS. Tied to OIC — this pair is used when
@@ -79,6 +113,10 @@ export const DEFAULT_MERCHANT_CONFIG: DDMerchantConfig = {
   disableCreditCard: false,
   enableBulkUpload: false,
   maxContractAmount: 100_000_000,
+  minFirstCollectionLeadWorkingDays: 4,
+  contractReviewExpiryDays: 7,
+  suppressCustomerNotifications: false,
+  actions: DEFAULT_ACTION_TOGGLES,
 };
 
 export const DEFAULT_BE_CONFIG: DDBackendConfig = {
@@ -92,6 +130,9 @@ export const DEFAULT_BE_CONFIG: DDBackendConfig = {
 // crash-parsed, by bumping the suffix.
 const STORAGE_KEY = "mpr:dd-merchant-config:v1";
 const STORAGE_KEY_BE = "mpr:dd-be-config:v1";
+// Dev hints switch (added 25-Sep-2026) — shows the ⓘ parameter-mapping icons across the Direct
+// Debit screens. Off by default so demos look like the real product.
+const STORAGE_KEY_DEV_HINTS = "mpr:dd-dev-hints:v1";
 
 /**
  * A tiny localStorage-backed external store, shaped for useSyncExternalStore. One instance per
@@ -113,9 +154,18 @@ function createLocalStorageStore<T extends object>(key: string, defaultValue: T)
       const raw = window.localStorage.getItem(key);
       if (!raw) return defaultValue;
       const parsed = JSON.parse(raw);
-      // Shallow-merge over the default so a field added in a later round (not present in an
-      // older saved blob) still gets its default rather than `undefined`.
-      return { ...defaultValue, ...parsed };
+      // Merge over the default so a field added in a later round (not present in an older saved
+      // blob) still gets its default rather than `undefined` — one level deep, so a nested object
+      // like `actions` also picks up toggles added after it was first saved.
+      const merged: Record<string, unknown> = { ...defaultValue, ...parsed };
+      for (const k of Object.keys(defaultValue)) {
+        const dv = (defaultValue as Record<string, unknown>)[k];
+        const pv = parsed?.[k];
+        if (dv && typeof dv === "object" && !Array.isArray(dv) && pv && typeof pv === "object") {
+          merged[k] = { ...dv, ...pv };
+        }
+      }
+      return merged as T;
     } catch {
       return defaultValue;
     }
@@ -162,11 +212,15 @@ function createLocalStorageStore<T extends object>(key: string, defaultValue: T)
 
 const merchantStore = createLocalStorageStore(STORAGE_KEY, DEFAULT_MERCHANT_CONFIG);
 const beStore = createLocalStorageStore(STORAGE_KEY_BE, DEFAULT_BE_CONFIG);
+const devHintsStore = createLocalStorageStore(STORAGE_KEY_DEV_HINTS, { on: false });
 
 interface DDConfigContextValue {
   config: DDMerchantConfig;
   setConfig: (patch: Partial<DDMerchantConfig>) => void;
   setMerchantOIC: (patch: Partial<DDMerchantOIC>) => void;
+  setActions: (patch: Partial<DDActionToggles>) => void;
+  devHints: boolean;
+  setDevHints: (on: boolean) => void;
   resetMerchantConfig: () => void;
   beConfig: DDBackendConfig;
   setBeConfig: (patch: Partial<DDBackendConfig>) => void;
@@ -182,6 +236,11 @@ export function DDConfigProvider({ children }: { children: ReactNode }) {
     merchantStore.getServerSnapshot,
   );
   const beConfig = useSyncExternalStore(beStore.subscribe, beStore.getSnapshot, beStore.getServerSnapshot);
+  const devHintsState = useSyncExternalStore(
+    devHintsStore.subscribe,
+    devHintsStore.getSnapshot,
+    devHintsStore.getServerSnapshot,
+  );
 
   function setConfig(patch: Partial<DDMerchantConfig>) {
     merchantStore.set({ ...merchantStore.getSnapshot(), ...patch });
@@ -190,6 +249,15 @@ export function DDConfigProvider({ children }: { children: ReactNode }) {
   function setMerchantOIC(patch: Partial<DDMerchantOIC>) {
     const prev = merchantStore.getSnapshot();
     merchantStore.set({ ...prev, merchantOIC: { ...prev.merchantOIC, ...patch } });
+  }
+
+  function setActions(patch: Partial<DDActionToggles>) {
+    const prev = merchantStore.getSnapshot();
+    merchantStore.set({ ...prev, actions: { ...prev.actions, ...patch } });
+  }
+
+  function setDevHints(on: boolean) {
+    devHintsStore.set({ on });
   }
 
   function resetMerchantConfig() {
@@ -210,6 +278,9 @@ export function DDConfigProvider({ children }: { children: ReactNode }) {
         config,
         setConfig,
         setMerchantOIC,
+        setActions,
+        devHints: devHintsState.on,
+        setDevHints,
         resetMerchantConfig,
         beConfig,
         setBeConfig,
