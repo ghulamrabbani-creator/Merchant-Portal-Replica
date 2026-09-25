@@ -18,6 +18,7 @@
 import { useState } from "react";
 import { Check, RotateCcw } from "lucide-react";
 import Modal from "@/components/ui/Modal";
+import FieldHint from "@/components/directdebit/FieldHint";
 import { useDDConfig, DEFAULT_BE_CONFIG } from "@/lib/dd-config-context";
 
 const inputClass =
@@ -74,8 +75,8 @@ export default function DDBEConfigModal({ open, onClose }: { open: boolean; onCl
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-                Username
+              <label className="mb-1 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                Username <FieldHint k="be.username" />
               </label>
               <input
                 value={draft.username}
@@ -84,8 +85,8 @@ export default function DDBEConfigModal({ open, onClose }: { open: boolean; onCl
               />
             </div>
             <div>
-              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-                Password
+              <label className="mb-1 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                Password <FieldHint k="be.password" />
               </label>
               <input
                 type="password"
@@ -98,7 +99,9 @@ export default function DDBEConfigModal({ open, onClose }: { open: boolean; onCl
         </div>
 
         <div className="mb-2 rounded-lg border border-border-color bg-page-bg px-4 py-3.5">
-          <div className="mb-1 text-[13.5px] font-semibold text-text-primary">Card Encryption Public Key</div>
+          <div className="mb-1 flex items-center gap-1.5 text-[13.5px] font-semibold text-text-primary">
+            Card Encryption Public Key <FieldHint k="be.cardKey" />
+          </div>
           <div className="mb-3 text-[12px] leading-relaxed text-text-muted">
             Used to encrypt the card number sent in the DDS contract-creation API.{" "}
             <span className="font-semibold text-text-secondary">
