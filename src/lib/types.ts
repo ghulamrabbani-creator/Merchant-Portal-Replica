@@ -116,16 +116,18 @@ export interface BulkUpload {
 // Occurrence -> Payment backend model this UI is a client of. Field names here map to that
 // model's Mandate/Subscription/Occurrence rows, simplified/flattened for the replica's mock data.
 
+// Ordered by DDS rank, most to least frequent (Backend Stories S1 §5.2 "Frequency table") —
+// reordered 25-Sep-2026 so every dropdown lists them in the same order DDS ranks them.
 export const DD_FREQUENCIES = [
   "Daily",
   "Weekly",
   "Monthly",
+  "Every Two Months",
   "Quarterly",
+  "Every Four Months",
   "Half-yearly",
   "Annually",
   "One Time Only",
-  "Every Two Months",
-  "Every Four Months",
 ] as const;
 export type DDFrequency = (typeof DD_FREQUENCIES)[number];
 
@@ -211,6 +213,9 @@ export type DDContractStatus =
   | "Suspended"
   | "Rejected"
   | "Cancelled";
+// Note (25-Sep-2026): a contract closed by a terminal refusal keeps status "Cancelled" and carries
+// the reason in `closureReasonCode` — the UI renders it as "Cancelled — <reason label>" per
+// Backend Stories S6 §2.1 (Mandate.status_label).
 
 /** Who supplies the payment instrument (IBAN/card) at contract-creation time — added Sep 2026
  *  for the To Be Filled By Customer (TBFC) flow. "merchant" is the existing path (unchanged
@@ -227,19 +232,39 @@ export type DDInstrumentProvidedBy = "merchant" | "customer";
  *  table (see DDContractStatus: "Awaiting Customer Details"). */
 export type DDMandateCreationStage = "awaiting_customer_instrument" | "submitted_to_dds";
 
+/** Backend Stories S2 §3a — bankAccountType (Order Model Mandate.account_type, DDS
+ *  customerBankAccountType). Added to the creation form 25-Sep-2026. */
+export type DDBankAccountType = "Current" | "Savings";
+
 /** Subscription-level only — independent of the Mandate's own DDContractStatus above.
  *  See Notes/Projects/Direct Debit.md, Contract Detail screen §Pause: Pause suspends the
  *  Subscription only, the Mandate stays Active throughout. */
-export type DDSubscriptionStatus = "Active" | "Paused";
+export type DDSubscriptionStatus = "Active" | "Paused" | "Cancelled";
 
-// "Skipped" (added Sep 2026): an occurrence whose due date passed while the subscription was
-// Paused, so it was never included in a payment file — distinct from Failed (which means it
-// WAS submitted and the bank rejected/errored it). Terminal, like Failed, but carries no
-// retryCount and is never eligible for Retry — only for a merchant-initiated Rollover (see
-// DDRolloverState and canRolloverOccurrence in lib/direct-debit.ts). Set at the T-1 payment-file
-// build step, not at the moment Pause is clicked, so a Resume before the due date arrives lets
-// the occurrence proceed normally instead of being pre-marked.
-export type DDOccurrenceStatus = "Paid" | "Failed" | "Scheduled" | "Skipped";
+// Occurrence statuses (reworked 25-Sep-2026 to match Backend Stories S5/S6):
+//  - Scheduled: not yet sent to DDS (payment_created = false). Only these can be amended (S7 §2).
+//  - Submitted: sent to DDS, result pending — also used while a retry is in flight (Payment
+//    status RPND "Representment Pending", S6 §1.3).
+//  - Paid: ACCP.
+//  - Rejected: the bank refused it (Payment RJCT) but it can still be retried — up to 3 times and
+//    only until its retry deadline (S6 §1.2). Not final.
+//  - Failed: final. Retries used up (F1), retry deadline passed (F2), terminal reason code (F3) or
+//    mandate closed (F4). Automatic rollover runs at this moment (S6 §3).
+//  - Skipped: never sent. `skipReason` says why (paused / min_gap / not_active_in_time /
+//    missed_submission). min_gap skips also auto-roll (S5 §1.1). Manual rollover of Skipped
+//    collections is OUT of MVP scope (S7) — removed from the prototype 25-Sep-2026.
+//  - Cancelled: will never happen because the contract closed (S3 §10, S6 §2.1, S7 §3).
+export type DDOccurrenceStatus =
+  | "Scheduled"
+  | "Submitted"
+  | "Paid"
+  | "Rejected"
+  | "Failed"
+  | "Skipped"
+  | "Cancelled";
+
+/** Occurrence.skip_reason (S5 check C3/C6, S7 §1). */
+export type DDSkipReason = "paused" | "min_gap" | "not_active_in_time" | "missed_submission";
 
 /** Per-occurrence flag, independent of `status` — status says WHY an occurrence didn't happen
  *  as originally due (Failed vs Skipped), rolledOver says WHETHER its amount got folded onto a
@@ -258,7 +283,7 @@ export type DDOccurrenceStatus = "Paid" | "Failed" | "Scheduled" | "Skipped";
  *  - "none": not rolled over (default / not yet decided, for a Skipped occurrence awaiting the
  *    merchant's choice).
  */
-export type DDRolloverState = "none" | "rolled_over" | "blocked_by_ceiling" | "exhausted";
+export type DDRolloverState = "none" | "rolled_over" | "blocked_by_ceiling" | "exhausted" | "no_destination";
 
 export interface DirectDebitOccurrence {
   seq: number;
@@ -278,6 +303,19 @@ export interface DirectDebitOccurrence {
   rolledOverFrom?: number[];
   /** Times Payment Representment has been called for this occurrence, capped at 3 (see Order Model `Payment.retry_count`). Not applicable to Skipped occurrences — nothing was ever submitted, so there's nothing to retry. */
   retryCount?: number;
+  /** Payment.reason_code — DDS paid / not-paid reason code (S5 §3.3), e.g. "I" insufficient funds.
+   *  A terminal code (S1 §5.5) makes the collection Failed immediately and closes the contract. */
+  reasonCode?: string;
+  /** Payment.current_status while a retry is in flight — "RPND" (Representment Pending). */
+  paymentStatus?: "RPND";
+  /** Occurrence.skip_reason — only set when status is Skipped. */
+  skipReason?: DDSkipReason;
+  /** Occurrence.original_amount — the amount as first scheduled; never changes (S2 §4a). */
+  originalAmount?: number;
+  /** Occurrence.amount_source (S2 §4b). */
+  amountSource?: "scheduled" | "merchant_edited" | "rollover_adjusted";
+  /** Occurrence.amend_reason (S7 §2.3). */
+  amendReason?: string;
   payoutStatus?: string; // "Settled" | "Pending settlement" | "—" — Order Model has no dedicated field yet, backend/APEX-derived
   collectedOn?: string;
   note?: string;
@@ -330,7 +368,64 @@ export interface DirectDebitContract {
   instrumentProvidedBy?: DDInstrumentProvidedBy;
   /** Only set when instrumentProvidedBy === "customer". See DDMandateCreationStage above. */
   mandateCreationStage?: DDMandateCreationStage;
+  // ---- Added 25-Sep-2026 (Backend Stories S2/S3/S6/S7) ----
+  /** Mandate.customer_email / customer_mobile_number — needed by the customer verification
+   *  screen (masked) and the signing notification. Older demo records fall back to sample values. */
+  customerEmail?: string;
+  customerMobile?: string;
+  /** Mandate.account_type (Bank Account only). */
+  bankAccountType?: DDBankAccountType;
+  /** Mandate.account_title / credit_card_holder_name. */
+  accountHolderTitle?: string;
+  cardHolderName?: string;
+  /** Subscription.frequency — the collection cadence. `frequency` above is the mandate's
+   *  payment_frequency ceiling. Absent on older records = same as `frequency`. */
+  collectionFrequency?: DDFrequency;
+  /** Subscription.schedule_version — bumped on every successful amend (S7 §2.3, A0). */
+  scheduleVersion?: number;
+  /** Mandate.closure_reason_code — set when a terminal refusal closed the contract (S6 §2.1). */
+  closureReasonCode?: string;
+  /** Mandate.signing_notification_count / signing_notification_sent_at (S3 §1). */
+  signingNotificationCount?: number;
+  signingNotificationSentAt?: string;
+  /** Mandate.review_link_expires_at (S2 §6.2), display format. */
+  reviewLinkExpiresAt?: string;
+  /** Prototype only — the exact POST /direct-debit/v1/contracts body this contract was created
+   *  with, kept so the "Contract submitted" page can show the payloads side by side. The real
+   *  Backend never stores the full IBAN/PAN (S2 §4b); this lives in the viewer's browser only. */
+  createRequest?: DDCreateContractRequest;
   /** Banner shown on the Contract Detail screen while mandateCreationStage is still
    *  "awaiting_customer_instrument" — mirrors pausedNote/cancelledNote's pattern above. */
   awaitingInstrumentNote?: string;
+}
+
+/** POST /direct-debit/v1/contracts request body — Backend Stories S2 §3a, field names exactly as
+ *  specified there. Used by the prototype's payload view (Contract submitted page). */
+export interface DDCreateContractRequest {
+  merchantReference: string;
+  contractDescription?: string;
+  notes?: string;
+  customerName: string;
+  customerEmail: string;
+  customerMobile: string;
+  emiratesId: string;
+  bankInfoFillByCustomer: boolean;
+  paymentMethodType?: DDInstrumentType;
+  bankName?: string;
+  accountHolderTitle?: string;
+  bankAccountType?: DDBankAccountType;
+  iban?: string;
+  cardNumber?: string;
+  cardHolderName?: string;
+  startDate: string;
+  endDate: string;
+  amountType: DDAmountType;
+  amount?: number;
+  minAmount: number;
+  maxAmount: number;
+  frequencyCeiling: DDFrequency;
+  frequency: DDFrequency;
+  firstCollectionDate: string;
+  rollover: { enabled: boolean; maxConsecutive?: number };
+  collections: { dueDate: string; amount: number }[];
 }
