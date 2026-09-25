@@ -1,13 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, ChevronDown, Check, AlertCircle, Pencil } from "lucide-react";
+import { X, ChevronDown, Check, AlertCircle, Pencil, Table2 } from "lucide-react";
 import clsx from "clsx";
 import { useDDConfig } from "@/lib/dd-config-context";
 import {
   DD_FREQUENCIES,
+  DDS_FREQUENCY_TABLE,
+  addDays,
+  addWorkingDays,
   buildOccurrenceSchedule,
+  ddToday,
+  diffDays,
   collectionFrequencyOptions,
   formatCreatedOn,
   formatDateNice,
@@ -15,12 +20,25 @@ import {
   maskInstrumentRef,
   minGapDays,
   nextContractRef,
+  newContractId,
   OccurrenceOverride,
   parseDateStr,
   toDateInputValue,
 } from "@/lib/direct-debit";
-import { DDAmountType, DDFrequency, DDInstrumentType, DDS_BANKS, DirectDebitContract, DirectDebitOccurrence } from "@/lib/types";
+import {
+  DDAmountType,
+  DDBankAccountType,
+  DDCreateContractRequest,
+  DDFrequency,
+  DDInstrumentType,
+  DDS_BANKS,
+  DirectDebitContract,
+  DirectDebitOccurrence,
+} from "@/lib/types";
 import { directDebitContracts } from "@/lib/mock-data";
+import { saveCreatedContract } from "@/lib/dd-contract-store";
+import FieldHint, { DevHintsFloatingToggle } from "@/components/directdebit/FieldHint";
+import { HintKey } from "@/lib/dd-field-map";
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -66,6 +84,9 @@ export default function CreateDirectDebitContractModal({
   // Customer & Mandate — Step 1 identity/instrument fields (made controlled Sep 2026 so this
   // data is actually captured and can be carried forward to the Contract Review & Sign page,
   // rather than sitting in uncontrolled `defaultValue` inputs that were never read anywhere).
+  // Dates default relative to today (25-Sep-2026) so the lead-time rule (V15) passes out of the
+  // box: first collection = today + (lead time + 2) working days.
+  const [today] = useState(() => ddToday());
   const [customerName, setCustomerName] = useState("Sara Ibrahim");
   const [customerEmail, setCustomerEmail] = useState("sara.ibrahim@example.com");
   const [customerMobile, setCustomerMobile] = useState("0501234567");
@@ -73,6 +94,7 @@ export default function CreateDirectDebitContractModal({
 
   const [bankName, setBankName] = useState<string>("Emiratesnbd Bank PJSC");
   const [accountHolderTitle, setAccountHolderTitle] = useState("Sara Ibrahim");
+  const [bankAccountType, setBankAccountType] = useState<DDBankAccountType>("Current");
   const [iban, setIban] = useState("AE07 0331 2345 6789 0123 456");
 
   const [cardHolderName, setCardHolderName] = useState("Sara Ibrahim");
@@ -88,11 +110,15 @@ export default function CreateDirectDebitContractModal({
   const [notes, setNotes] = useState("");
 
   // Mandate validity window (contract-level)
-  const [commencesOn, setCommencesOn] = useState("2026-08-25");
-  const [expiresOn, setExpiresOn] = useState("2027-08-25");
+  const [commencesOn, setCommencesOn] = useState(() => toDateInputValue(today));
+  const [expiresOn, setExpiresOn] = useState(() =>
+    toDateInputValue(new Date(today.getFullYear() + 1, today.getMonth(), today.getDate()))
+  );
   // Subscription start (First Collection Date) — see Order Model: subscription_start_date is
   // distinct from mandate.commencesOn; subscription_end_date currently always mirrors expiresOn.
-  const [firstCollectionDate, setFirstCollectionDate] = useState("2026-09-05");
+  const [firstCollectionDate, setFirstCollectionDate] = useState(() =>
+    toDateInputValue(addWorkingDays(today, config.minFirstCollectionLeadWorkingDays + 2))
+  );
 
   const [rolloverEnabled, setRolloverEnabled] = useState(true);
   const [rolloversAllowed, setRolloversAllowed] = useState(2);
@@ -106,6 +132,8 @@ export default function CreateDirectDebitContractModal({
   const [draftError, setDraftError] = useState("");
   const [overrides, setOverrides] = useState<Record<number, OccurrenceOverride>>({});
   const [acknowledged, setAcknowledged] = useState(true);
+  const [showRules, setShowRules] = useState(false);
+  const [stepErrors, setStepErrors] = useState<string[]>([]);
 
   const fixedActive = amountType === "Fixed";
   const bankActive = effectiveInstrumentType === "Bank Account";
@@ -131,21 +159,77 @@ export default function CreateDirectDebitContractModal({
   const collectionFreqOptions = collectionFrequencyOptions(frequencyCeiling);
   const requiredMax = installment * (rolloversAllowed + 1);
   const rolloverOk = requiredMax <= maxAmount;
-  const gapDays = minGapDays(collectionFrequency);
+  // V8 — the DDS minimum gap follows the MANDATE's payment frequency (frequencyCeiling), not the
+  // collection frequency (Backend Stories S2 V8; DDS-confirmed 24-Sep-2026).
+  const gapDays = minGapDays(frequencyCeiling);
   const firstOcc = built.list[0];
 
   if (!open) return null;
 
   const goTo = (n: Step) => {
+    if (n > step) {
+      const errs = validateStep(step);
+      setStepErrors(errs);
+      if (errs.length) return;
+    } else setStepErrors([]);
     setStep(n);
     setEditingSeq(null);
     setMaxStepReached((m) => (m >= n ? m : n));
   };
   const prevStep = () => {
+    setStepErrors([]);
     setStep((s) => (s > 1 ? ((s - 1) as Step) : s));
     setEditingSeq(null);
   };
+  // Contract × collections rules the portal can check before the Backend does (S2 §3b). The
+  // Backend re-checks every one — this only saves the merchant a round trip.
+  const leadDays = config.minFirstCollectionLeadWorkingDays;
+  const earliestFirst = addWorkingDays(today, leadDays);
+  const validateStep = (n: Step): string[] => {
+    const errs: string[] = [];
+    if (n >= 1) {
+      if (maxAmount > config.maxContractAmount)
+        errs.push(
+          `MAX_AMOUNT_EXCEEDS_LIMIT (V14) — max amount ${formatMoneyAED(maxAmount)} is above this merchant's Maximum Contract Amount of ${formatMoneyAED(config.maxContractAmount)}.`
+        );
+      if (minAmount > maxAmount) errs.push("MAX_AMOUNT_EXCEEDS_LIMIT (V14) — min amount is above max amount.");
+      if (parseDateStr(commencesOn) < today || parseDateStr(expiresOn) <= parseDateStr(commencesOn))
+        errs.push("INVALID_CONTRACT_PERIOD (V1) — Commences on must be today or later, and Expires on after it.");
+    }
+    if (n >= 2) {
+      const fc = parseDateStr(firstCollectionDate);
+      if (diffDays(earliestFirst, fc) < 0)
+        errs.push(
+          `FIRST_COLLECTION_TOO_SOON (V15) — first collection must be on or after ${formatDateNice(earliestFirst)} (today + ${leadDays} working days, per this merchant's lead time).`
+        );
+      if (fc < parseDateStr(commencesOn) || fc > parseDateStr(expiresOn))
+        errs.push("FIRST_COLLECTION_OUT_OF_PERIOD (V2) — first collection must fall inside the contract period.");
+    }
+    if (n >= 3) {
+      for (let i = 1; i < built.list.length; i++) {
+        const g = diffDays(built.list[i - 1].date, built.list[i].date);
+        if (g < gapDays)
+          errs.push(
+            `COLLECTION_GAP_TOO_SHORT (V8) — #${built.list[i - 1].seq} → #${built.list[i].seq} is ${g} days; DDS needs at least ${gapDays} for a ${frequencyCeiling} mandate.`
+          );
+        if (built.list[i].date <= built.list[i - 1].date)
+          errs.push(`COLLECTION_DATE_ORDER (V6) — #${built.list[i].seq} must be after #${built.list[i - 1].seq}.`);
+      }
+      if (!fixedActive) {
+        const out = built.list.filter((o) => o.amount < minAmount || o.amount > maxAmount);
+        if (out.length)
+          errs.push(
+            `COLLECTION_AMOUNT_OUT_OF_RANGE (V10) — #${out.map((o) => o.seq).join(", #")} outside ${formatMoneyAED(minAmount)} – ${formatMoneyAED(maxAmount)}.`
+          );
+      }
+    }
+    return errs;
+  };
+
   const nextStep = () => {
+    const errs = validateStep(step);
+    setStepErrors(errs);
+    if (errs.length) return;
     const n = (step < 4 ? step + 1 : step) as Step;
     setStep(n);
     setEditingSeq(null);
@@ -184,7 +268,9 @@ export default function CreateDirectDebitContractModal({
     const gapPrevOk = !prev || Math.abs((newDate.getTime() - prev.date.getTime()) / 86400000) >= gapDays;
     const gapNextOk = !next || Math.abs((next.date.getTime() - newDate.getTime()) / 86400000) >= gapDays;
     if (!gapPrevOk || !gapNextOk) {
-      setDraftError(`Must stay at least ~${gapDays} days from the neighboring collection.`);
+      setDraftError(
+        `COLLECTION_GAP_TOO_SHORT (V8) — must stay at least ${gapDays} days from the neighbouring collection (DDS minimum gap for a ${frequencyCeiling} mandate).`
+      );
       return;
     }
     setOverrides((prevOverrides) => ({
@@ -215,11 +301,48 @@ export default function CreateDirectDebitContractModal({
   // (Pause/Resume/Retry/Rollover) — the shared `directDebitContracts` mock array is pushed to
   // directly and read back by id on the next page; it resets on a full reload, same as those.
   const handleCreateAndSend = () => {
-    const id = `dd${Date.now()}`;
+    const errs = validateStep(4);
+    setStepErrors(errs);
+    if (errs.length) return;
+    const id = newContractId();
+    // The exact POST /direct-debit/v1/contracts body (Backend Stories S2 §3a) — kept on the
+    // prototype record so the Contract submitted page can show it next to the DDS payload.
+    const createRequest: DDCreateContractRequest = {
+      merchantReference: merchantRef,
+      contractDescription: contractDescription.trim() || undefined,
+      notes: notes.trim() || undefined,
+      customerName,
+      customerEmail,
+      customerMobile,
+      emiratesId: customerIdNumber,
+      bankInfoFillByCustomer: tbfc,
+      paymentMethodType: tbfc ? undefined : effectiveInstrumentType,
+      bankName: tbfc ? undefined : bankActive ? bankName : issuingBank,
+      accountHolderTitle: !tbfc && bankActive ? accountHolderTitle : undefined,
+      bankAccountType: !tbfc && bankActive ? bankAccountType : undefined,
+      iban: !tbfc && bankActive ? iban.replace(/\s/g, "") : undefined,
+      cardNumber: !tbfc && !bankActive ? cardNumber.replace(/\s/g, "") : undefined,
+      cardHolderName: !tbfc && !bankActive ? cardHolderName : undefined,
+      startDate: commencesOn,
+      endDate: expiresOn,
+      amountType,
+      amount: fixedActive ? installment : undefined,
+      minAmount,
+      maxAmount,
+      frequencyCeiling,
+      frequency: collectionFrequency,
+      firstCollectionDate,
+      rollover: effectiveRolloverEnabled
+        ? { enabled: true, maxConsecutive: rolloversAllowed }
+        : { enabled: false },
+      collections: built.list.map((o) => ({ dueDate: toDateInputValue(o.date), amount: o.amount })),
+    };
     const occurrences: DirectDebitOccurrence[] = built.list.map((o) => ({
       seq: o.seq,
       dueDate: formatDateNice(o.date),
       amount: o.amount,
+      originalAmount: o.amount,
+      amountSource: "scheduled",
       status: "Scheduled",
       rolledOver: "none",
     }));
@@ -235,6 +358,17 @@ export default function CreateDirectDebitContractModal({
       customerName,
       customerIdType: "Emirates ID",
       customerIdNumber,
+      customerEmail,
+      customerMobile,
+      bankAccountType: !tbfc && bankActive ? bankAccountType : undefined,
+      accountHolderTitle: !tbfc && bankActive ? accountHolderTitle : undefined,
+      cardHolderName: !tbfc && !bankActive ? cardHolderName : undefined,
+      collectionFrequency,
+      scheduleVersion: 1,
+      signingNotificationCount: config.suppressCustomerNotifications ? 0 : 1,
+      signingNotificationSentAt: config.suppressCustomerNotifications ? undefined : formatCreatedOn(new Date()),
+      reviewLinkExpiresAt: formatDateNice(addDays(today, config.contractReviewExpiryDays)),
+      createRequest,
       // Under TBFC the customer picks the instrument TYPE too (not just its details) on the Sign
       // page's instrument step — left unset here rather than defaulting to the merchant's unused
       // pill selection, so the UI can tell "not yet chosen" apart from an actual choice.
@@ -261,8 +395,13 @@ export default function CreateDirectDebitContractModal({
       occurrences,
     };
     directDebitContracts.unshift(newContract);
+    // Also stored in this browser so the review link can open in a new tab (dd-contract-store).
+    saveCreatedContract(newContract);
     onClose();
-    router.push(`/direct-debit/${id}/sign`);
+    // New step (25-Sep-2026): the merchant lands on "Contract submitted" — payloads sent to the
+    // DD Backend and DDS, plus the SMS / email the customer receives — instead of going straight
+    // to the customer's review page.
+    router.push(`/direct-debit/${id}/submitted`);
   };
 
   const pillActive = "flex-1 rounded-lg py-2.5 text-center text-sm font-semibold bg-brand-orange text-white cursor-pointer";
@@ -330,7 +469,7 @@ export default function CreateDirectDebitContractModal({
               </p>
 
               <div className="mb-4">
-                <Label>Merchant reference number</Label>
+                <Label hint="create.merchantReference" hintValue={JSON.stringify(merchantRef)}>Merchant reference number</Label>
                 <input
                   value={merchantRef}
                   onChange={(e) => setMerchantRef(e.target.value)}
@@ -340,7 +479,7 @@ export default function CreateDirectDebitContractModal({
               </div>
 
               <div className="mb-4">
-                <Label>Contract description</Label>
+                <Label hint="create.contractDescription">Contract description</Label>
                 <input
                   value={contractDescription}
                   onChange={(e) => setContractDescription(e.target.value)}
@@ -356,7 +495,7 @@ export default function CreateDirectDebitContractModal({
 
               <div className="mb-4 grid grid-cols-2 gap-3.5">
                 <div>
-                  <Label>Customer full name</Label>
+                  <Label hint="create.customerName">Customer full name</Label>
                   <input
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
@@ -364,7 +503,7 @@ export default function CreateDirectDebitContractModal({
                   />
                 </div>
                 <div>
-                  <Label>Customer email</Label>
+                  <Label hint="create.customerEmail">Customer email</Label>
                   <input
                     value={customerEmail}
                     onChange={(e) => setCustomerEmail(e.target.value)}
@@ -372,7 +511,7 @@ export default function CreateDirectDebitContractModal({
                   />
                 </div>
                 <div>
-                  <Label>Mobile number</Label>
+                  <Label hint="create.customerMobile">Mobile number</Label>
                   <input
                     value={customerMobile}
                     onChange={(e) => setCustomerMobile(e.target.value)}
@@ -381,7 +520,7 @@ export default function CreateDirectDebitContractModal({
                   <Help>Registered on UAE PASS</Help>
                 </div>
                 <div>
-                  <Label>Emirates ID number</Label>
+                  <Label hint="create.emiratesId">Emirates ID number</Label>
                   <input
                     value={customerIdNumber}
                     onChange={(e) => setCustomerIdNumber(e.target.value)}
@@ -390,7 +529,7 @@ export default function CreateDirectDebitContractModal({
                 </div>
               </div>
 
-              <Label>Payment instrument</Label>
+              <Label hint="create.paymentMethodType" hintValue={tbfc ? "absent (TBFC)" : JSON.stringify(effectiveInstrumentType)}>Payment instrument</Label>
 
               <div className="mb-3 flex items-start gap-2.5 rounded-lg border border-border-color bg-page-bg px-3.5 py-3">
                 <button
@@ -403,7 +542,10 @@ export default function CreateDirectDebitContractModal({
                   {tbfc && <Check size={12} strokeWidth={3} className="text-white" />}
                 </button>
                 <div>
-                  <div className="text-[13px] font-medium text-text-primary">To Be Filled By Customer</div>
+                  <div className="flex items-center gap-1.5 text-[13px] font-medium text-text-primary">
+                    To Be Filled By Customer
+                    <FieldHint k="create.tbfc" value={`bankInfoFillByCustomer = ${tbfc}`} />
+                  </div>
                   <div className="mt-0.5 text-[11.5px] text-text-muted">
                     Leave the instrument entirely to the customer — they&apos;ll choose Bank Account or Credit
                     Card and supply its details on their own review-and-sign step. Create DDA isn&apos;t called
@@ -427,7 +569,7 @@ export default function CreateDirectDebitContractModal({
                   {bankActive ? (
                     <div key="bank-account-fields" className="mb-4 grid grid-cols-2 gap-3.5">
                       <div>
-                        <Label>Bank name</Label>
+                        <Label hint="create.bankName">Bank name</Label>
                         <select
                           value={bankName}
                           onChange={(e) => setBankName(e.target.value)}
@@ -442,15 +584,29 @@ export default function CreateDirectDebitContractModal({
                         <Help>Per the DDS Banks Master Table</Help>
                       </div>
                       <div>
-                        <Label>Account holder title</Label>
+                        <Label hint="create.accountHolderTitle">Account holder title</Label>
                         <input
                           value={accountHolderTitle}
                           onChange={(e) => setAccountHolderTitle(e.target.value)}
                           className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
                         />
                       </div>
-                      <div className="col-span-2">
-                        <Label>IBAN</Label>
+                      <div>
+                        <Label hint="create.bankAccountType" hintValue={JSON.stringify(bankAccountType)}>Account type</Label>
+                        <div className="flex rounded-xl bg-page-bg p-1">
+                          {(["Current", "Savings"] as DDBankAccountType[]).map((t) => (
+                            <button
+                              key={t}
+                              onClick={() => setBankAccountType(t)}
+                              className={bankAccountType === t ? pillActive : pillInactive}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <Label hint="create.iban">IBAN</Label>
                         <input
                           value={iban}
                           onChange={(e) => setIban(e.target.value)}
@@ -461,7 +617,7 @@ export default function CreateDirectDebitContractModal({
                   ) : (
                     <div key="credit-card-fields" className="mb-4 grid grid-cols-2 gap-3.5">
                       <div>
-                        <Label>Card holder name</Label>
+                        <Label hint="create.cardHolderName">Card holder name</Label>
                         <input
                           value={cardHolderName}
                           onChange={(e) => setCardHolderName(e.target.value)}
@@ -469,7 +625,7 @@ export default function CreateDirectDebitContractModal({
                         />
                       </div>
                       <div>
-                        <Label>Issuing bank</Label>
+                        <Label hint="create.issuingBank">Issuing bank</Label>
                         <select
                           value={issuingBank}
                           onChange={(e) => setIssuingBank(e.target.value)}
@@ -484,7 +640,7 @@ export default function CreateDirectDebitContractModal({
                         <Help>Per the DDS Banks Master Table</Help>
                       </div>
                       <div className="col-span-2">
-                        <Label>Card number</Label>
+                        <Label hint="create.cardNumber">Card number</Label>
                         <input
                           value={cardNumber}
                           onChange={(e) => setCardNumber(e.target.value)}
@@ -504,7 +660,7 @@ export default function CreateDirectDebitContractModal({
 
               <div className="mb-4 grid grid-cols-2 gap-3.5">
                 <div>
-                  <Label>Commences on</Label>
+                  <Label hint="create.startDate">Commences on</Label>
                   <input
                     type="date"
                     value={commencesOn}
@@ -513,7 +669,7 @@ export default function CreateDirectDebitContractModal({
                   />
                 </div>
                 <div>
-                  <Label>Expires on</Label>
+                  <Label hint="create.endDate">Expires on</Label>
                   <input
                     type="date"
                     value={expiresOn}
@@ -523,7 +679,7 @@ export default function CreateDirectDebitContractModal({
                 </div>
               </div>
 
-              <Label>Amount type</Label>
+              <Label hint="create.amountType" hintValue={JSON.stringify(amountType)}>Amount type</Label>
               <div className="mb-4 flex max-w-[280px] rounded-xl bg-page-bg p-1">
                 <button onClick={setFixed} className={fixedActive ? pillActive : pillInactive}>
                   Fixed
@@ -535,7 +691,7 @@ export default function CreateDirectDebitContractModal({
 
               <div className="grid grid-cols-3 gap-3.5">
                 <div>
-                  <Label>Min amount (AED)</Label>
+                  <Label hint="create.minAmount">Min amount (AED)</Label>
                   <input
                     type="number"
                     value={minAmount}
@@ -544,7 +700,7 @@ export default function CreateDirectDebitContractModal({
                   />
                 </div>
                 <div>
-                  <Label>Max amount (AED)</Label>
+                  <Label hint="create.maxAmount">Max amount (AED)</Label>
                   <input
                     type="number"
                     value={maxAmount}
@@ -554,14 +710,14 @@ export default function CreateDirectDebitContractModal({
                   <Help>Must cover the highest planned installment or full rollover total</Help>
                 </div>
                 <div>
-                  <Label>Payment frequency ceiling</Label>
+                  <Label hint="create.frequencyCeiling" hintValue={JSON.stringify(frequencyCeiling)}>Payment frequency ceiling</Label>
                   <SelectField value={frequencyCeiling} onChange={(v) => onCeilingChange(v as DDFrequency)} options={DD_FREQUENCIES} />
                   <Help>DDS allows no more than one collection per this period</Help>
                 </div>
               </div>
 
               <div className="mt-4">
-                <Label>Notes (optional)</Label>
+                <Label hint="create.notes">Notes (optional)</Label>
                 <textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
@@ -581,7 +737,7 @@ export default function CreateDirectDebitContractModal({
 
               <div className="mb-4 grid grid-cols-2 gap-3.5">
                 <div>
-                  <Label>Collection frequency</Label>
+                  <Label hint="create.frequency" hintValue={JSON.stringify(collectionFrequency)}>Collection frequency</Label>
                   <SelectField
                     value={collectionFrequency}
                     onChange={(v) => setCollectionFrequency(v as DDFrequency)}
@@ -590,19 +746,22 @@ export default function CreateDirectDebitContractModal({
                   <Help>Frequencies more frequent than the ceiling ({frequencyCeiling}) are hidden</Help>
                 </div>
                 <div>
-                  <Label>First collection date</Label>
+                  <Label hint="create.firstCollectionDate" hintValue={JSON.stringify(firstCollectionDate)}>First collection date</Label>
                   <input
                     type="date"
                     value={firstCollectionDate}
                     onChange={(e) => setFirstCollectionDate(e.target.value)}
                     className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
                   />
-                  <Help>Sets the recurring collection day — can differ from Commences On</Help>
+                  <Help>
+                    Sets the recurring collection day. Earliest allowed: {formatDateNice(earliestFirst)} (today +{" "}
+                    {leadDays} working days — this merchant&apos;s lead time)
+                  </Help>
                 </div>
               </div>
 
               <div className="mb-5">
-                <Label>Collection amount (AED)</Label>
+                <Label hint="create.amount">Collection amount (AED)</Label>
                 <input
                   type="number"
                   value={installment}
@@ -614,7 +773,10 @@ export default function CreateDirectDebitContractModal({
 
               <div className="mb-3.5 flex items-center justify-between border-t border-border-color pt-[18px]">
                 <div>
-                  <div className="text-[13.5px] font-semibold text-text-primary">Rollover</div>
+                  <div className="flex items-center gap-1.5 text-[13.5px] font-semibold text-text-primary">
+                    Rollover
+                    <FieldHint k="create.rolloverEnabled" value={`rollover.enabled = ${effectiveRolloverEnabled}`} />
+                  </div>
                   {!fixedActive ? (
                     <div className="mt-0.5 text-[11.5px] text-text-muted">
                       Fold a failed collection&apos;s amount onto a future occurrence, capped by the contract&apos;s max amount
@@ -640,7 +802,7 @@ export default function CreateDirectDebitContractModal({
               {effectiveRolloverEnabled && (
                 <>
                   <div className="mb-4 flex items-center gap-3.5">
-                    <Label noMargin>Rollovers allowed</Label>
+                    <Label noMargin hint="create.rolloversAllowed" hintValue={String(rolloversAllowed)}>Rollovers allowed</Label>
                     <div className="flex items-center gap-2.5 rounded-lg border border-border-color px-2 py-1">
                       <button
                         onClick={() => setRolloversAllowed((v) => Math.max(0, v - 1))}
@@ -684,11 +846,55 @@ export default function CreateDirectDebitContractModal({
 
           {step === 3 && (
             <div>
-              <h2 className="mb-1.5 text-xl font-bold text-text-primary">Collection Preview</h2>
-              <p className="mb-5 text-[13px] text-text-muted">
+              <h2 className="mb-1.5 flex items-center gap-1.5 text-xl font-bold text-text-primary">
+                Collection Preview <FieldHint k="create.collections" />
+              </h2>
+              <p className="mb-3 text-[13px] text-text-muted">
                 Every collection generated from the schedule above. {fixedActive ? "Edit the due date" : "Edit the due date or amount"} of
-                any collection — a new due date must stay clear of neighboring collections by the collection frequency.
+                any collection — two collections must stay at least <strong>{gapDays} days</strong> apart, DDS&apos;s
+                minimum gap for a {frequencyCeiling} mandate.
               </p>
+              <button
+                onClick={() => setShowRules((v) => !v)}
+                className="mb-4 flex items-center gap-1.5 text-[12px] font-semibold text-brand-blue"
+              >
+                <Table2 size={13} />
+                {showRules ? "Hide" : "Show"} DDS minimum-gap table
+              </button>
+              {showRules && (
+                <div className="mb-5 overflow-hidden rounded-lg border border-border-color" data-testid="min-gap-table">
+                  <table className="w-full text-[12.5px]">
+                    <thead>
+                      <tr className="bg-page-bg text-left text-text-secondary">
+                        <th className="px-3 py-2 font-medium">Payment frequency</th>
+                        <th className="px-3 py-2 font-medium">DDS period (days)</th>
+                        <th className="px-3 py-2 font-medium">Min gap between two successful debits (days)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {DDS_FREQUENCY_TABLE.map((r) => (
+                        <tr
+                          key={r.frequency}
+                          className={clsx(
+                            "border-t border-border-color",
+                            r.frequency === frequencyCeiling && "bg-brand-blue/5 font-semibold"
+                          )}
+                        >
+                          <td className="px-3 py-1.5">{r.frequency}</td>
+                          <td className="px-3 py-1.5">{r.periodDays ?? "—"}</td>
+                          <td className="px-3 py-1.5">{r.minGapDays ?? "Not applicable (one collection)"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="border-t border-border-color bg-page-bg px-3 py-2 text-[11.5px] text-text-muted">
+                    DDS-confirmed 24-Sep-2026. Counted from the actual debit date of the previous successful
+                    claim — e.g. Monthly debited 15 Sep → next claim no earlier than 8 Oct. At creation only
+                    due dates exist, so due dates are checked; the Backend re-checks against the real debit date
+                    before each file.
+                  </div>
+                </div>
+              )}
 
               <div className="overflow-hidden rounded-lg border border-border-color">
                 <table className="w-full text-sm">
@@ -704,8 +910,8 @@ export default function CreateDirectDebitContractModal({
                     {built.list.map((o, idx) => {
                       const isEditing = editingSeq === o.seq;
                       return (
-                        <>
-                          <tr key={o.seq} className="border-t border-border-color align-top">
+                        <Fragment key={o.seq}>
+                          <tr className="border-t border-border-color align-top">
                             <td className="px-3.5 py-2.5 text-text-muted">{o.seq}</td>
                             <td className="px-3.5 py-2.5">
                               {isEditing ? (
@@ -757,7 +963,7 @@ export default function CreateDirectDebitContractModal({
                               </td>
                             </tr>
                           )}
-                        </>
+                        </Fragment>
                       );
                     })}
                   </tbody>
@@ -776,7 +982,9 @@ export default function CreateDirectDebitContractModal({
             <div>
               <h2 className="mb-1.5 text-xl font-bold text-text-primary">Review &amp; Send for Signature</h2>
               <p className="mb-5 text-[13px] text-text-muted">
-                The customer receives a signing link by SMS and email and signs via UAE PASS — there&apos;s no in-app option.
+                {config.suppressCustomerNotifications
+                  ? "Geidea customer notifications are suppressed for this merchant — Geidea sends nothing; you share the review link (or the UAE PASS signing URL) with the customer from your own channels."
+                  : "Geidea sends the customer a review & signing link by SMS, email and WhatsApp. They verify with an OTP, review the contract and sign via UAE PASS."}
               </p>
 
               <div className="flex flex-col gap-3">
@@ -861,6 +1069,19 @@ export default function CreateDirectDebitContractModal({
         </div>
       </div>
 
+      {stepErrors.length > 0 && (
+        <div className="border-t border-status-expired/40 bg-status-expired/5 px-8 py-3" data-testid="step-errors">
+          {stepErrors.map((e, i) => (
+            <div key={i} className="flex items-start gap-2 text-[12.5px] text-status-expired">
+              <AlertCircle size={14} className="mt-0.5 shrink-0" />
+              {e}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <DevHintsFloatingToggle />
+
       {/* Footer */}
       <div className="flex items-center justify-end gap-3 border-t border-border-color px-8 py-4">
         <button
@@ -870,13 +1091,17 @@ export default function CreateDirectDebitContractModal({
           Back
         </button>
         {step === 4 ? (
+          <>
           <button
             onClick={handleCreateAndSend}
             disabled={!acknowledged}
+            data-testid="create-and-send"
             className="rounded-lg bg-brand-blue px-[26px] py-2.5 text-[13.5px] font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             Create &amp; Send Contract
           </button>
+          <FieldHint k="create.submit" />
+          </>
         ) : (
           <button
             onClick={nextStep}
@@ -890,8 +1115,23 @@ export default function CreateDirectDebitContractModal({
   );
 }
 
-function Label({ children, noMargin }: { children: React.ReactNode; noMargin?: boolean }) {
-  return <div className={clsx("text-[12.5px] font-semibold text-text-primary", !noMargin && "mb-1.5")}>{children}</div>;
+function Label({
+  children,
+  noMargin,
+  hint,
+  hintValue,
+}: {
+  children: React.ReactNode;
+  noMargin?: boolean;
+  hint?: HintKey;
+  hintValue?: string;
+}) {
+  return (
+    <div className={clsx("flex items-center gap-1.5 text-[12.5px] font-semibold text-text-primary", !noMargin && "mb-1.5")}>
+      {children}
+      {hint && <FieldHint k={hint} value={hintValue} />}
+    </div>
+  );
 }
 
 function Help({ children }: { children: React.ReactNode }) {
