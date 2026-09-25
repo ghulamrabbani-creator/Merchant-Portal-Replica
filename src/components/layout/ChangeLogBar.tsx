@@ -5,6 +5,7 @@ import Modal from "@/components/ui/Modal";
 import { LAST_UPDATED, CHANGELOG } from "@/lib/changelog";
 import PGWConfigModal from "@/components/directdebit/PGWConfigModal";
 import DDBEConfigModal from "@/components/directdebit/DDBEConfigModal";
+import { useDDConfig } from "@/lib/dd-config-context";
 
 // Dev-reference banner (added Sep 2026, Rabbani) — spans the full width above the portal's own
 // chrome (sidebar + Topbar) so it reads as meta-information about this build, not part of the
@@ -14,6 +15,7 @@ export default function ChangeLogBar() {
   const [open, setOpen] = useState(false);
   const [pgwConfigOpen, setPgwConfigOpen] = useState(false);
   const [beConfigOpen, setBeConfigOpen] = useState(false);
+  const { devHints, setDevHints } = useDDConfig();
 
   return (
     <>
@@ -39,6 +41,24 @@ export default function ChangeLogBar() {
           className="underline underline-offset-2 hover:text-red-300"
         >
           DD BE Config
+        </button>
+        <span className="text-red-400/40">|</span>
+        {/* Dev hints (added 25-Sep-2026): shows the ⓘ parameter-mapping icons on the Direct Debit
+            screens. Off by default; persisted per browser like the DD config. */}
+        <button
+          onClick={() => setDevHints(!devHints)}
+          className="flex items-center gap-1.5 hover:text-red-300"
+          title="Show which Backend / DDS parameter each Direct Debit field maps to"
+          data-testid="dev-hints-toggle"
+        >
+          <span className="underline underline-offset-2">Dev hints</span>
+          <span
+            className={`rounded px-1.5 py-px text-[10.5px] font-bold ${
+              devHints ? "bg-fuchsia-600 text-white" : "bg-red-400/20 text-red-300"
+            }`}
+          >
+            {devHints ? "ON" : "OFF"}
+          </span>
         </button>
       </div>
 
