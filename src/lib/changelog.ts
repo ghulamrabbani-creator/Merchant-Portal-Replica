@@ -15,7 +15,7 @@ export interface ChangelogEntry {
   description: string;
 }
 
-export const LAST_UPDATED = "10 Sep 2026 (2)";
+export const LAST_UPDATED = "25 Sep 2026";
 
 // Full history below covers Direct Debit specifically, back to its first release on the portal
 // (01 Sep 2026) — compiled 09 Sep 2026 from the repo's commit history across every session so far.
@@ -27,6 +27,16 @@ export const LAST_UPDATED = "10 Sep 2026 (2)";
 // pass on GitHub. Corrected back to match the actual shipped code (customer picks under TBFC,
 // confirmed live by Rabbani on 10-Sep-2026) rather than silently left stale.
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    date: "25 Sep 2026",
+    description:
+      "Direct Debit aligned to Backend Stories S1–S7. (1) Dev hints: a new \"Dev hints\" switch in this bar (off by default) shows an ⓘ next to every DD field, column and action — hover to see the BE API field, Order Model field and DDS field it's sent to or read from, with the live value. (2) PGW Config in MA adds Suppress Geidea customer notifications, first-collection lead time (4 working days), contract review expiry (7 days) and the 8 per-action toggles; Maximum Contract Amount and lead time are now enforced at contract creation. (3) After Create & Send, a new Contract submitted page shows the Portal → DD Backend and DD Backend → DDS (Create DDA) payloads side by side, plus the SMS and email the customer receives (hidden when notifications are suppressed). (4) The customer link now opens /contracts/review/{id} in a new tab: a verification screen (merchant name, description, masked EID/email/mobile, OTP by SMS or email — 123456 in the prototype) before the existing review & sign page. Created contracts are stored in this browser's localStorage so the new tab can find them.",
+  },
+  {
+    date: "25 Sep 2026",
+    description:
+      "Direct Debit collections: manual rollover (Rollover button, destination picker, Undo) removed — out of MVP scope; only automatic rollover is shown. New statuses Rejected (retryable) vs Failed (final), Representment Pending while a retry is with DDS, and DDS reason codes. Retry now follows the retry deadline (next due date − DDS minimum gap − 1 working day) and is blocked for terminal reason codes, which close the contract as \"Cancelled — <reason>\". Collection Preview uses the DDS minimum-gap table (by payment frequency ceiling). Contract Detail gets Amend schedule (subscription-level, validated against rules A0–A13) and Resend signing link. New demo contracts: Terminal Refusal, Retry Window Closed, Amend Schedule.",
+  },
   {
     date: "10 Sep 2026",
     description:
