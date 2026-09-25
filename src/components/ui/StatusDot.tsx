@@ -31,6 +31,8 @@ const colorMap: Record<string, string> = {
   // from Submitted/Created, that needs a new color added to the Tailwind config first — happy to
   // wire it up once that token exists.
   Skipped: "bg-status-submitted",
+  // Added 25-Sep-2026 (Backend Stories S5/S6): a retry in flight at DDS (Payment status RPND).
+  "Representment Pending": "bg-status-pending",
 };
 
 export default function StatusDot({ status }: { status: string }) {
@@ -39,7 +41,9 @@ export default function StatusDot({ status }: { status: string }) {
       <span
         className={clsx(
           "h-2 w-2 rounded-full",
-          colorMap[status] ?? "bg-status-submitted"
+          colorMap[status] ??
+            // "Cancelled — Account closed" (terminal-refusal closure label, S6 §2.1)
+            (status.startsWith("Cancelled") ? "bg-status-declined" : "bg-status-submitted")
         )}
       />
       {status}
