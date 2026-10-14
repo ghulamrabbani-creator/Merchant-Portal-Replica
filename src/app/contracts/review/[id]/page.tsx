@@ -23,9 +23,13 @@ import FieldHint, { DevHintsFloatingToggle } from "@/components/directdebit/Fiel
 
 type PageState = "NOT_AVAILABLE" | "ALREADY_SIGNED" | "EXPIRED" | "OTP_REQUIRED" | "READY";
 
+// Page states realigned 14-Oct-2026 (MP Backlog v2 US-33): Discarded, Not Submitted and every
+// refused/closed status → NOT_AVAILABLE; Link Expired / DD Request Expired → EXPIRED; anything
+// signed (Pending System Submission onward, incl. Expired at end of term) → ALREADY_SIGNED.
 function initialPageState(c: DirectDebitContract | undefined): PageState {
-  if (!c || c.status === "Cancelled" || c.status === "Rejected") return "NOT_AVAILABLE";
-  if (c.status === "Pending Bank Approval" || c.status === "Active" || c.status === "Suspended") return "ALREADY_SIGNED";
+  if (!c || ["Cancelled", "Rejected", "Denied", "Error", "Discarded", "Not Submitted"].includes(c.status)) return "NOT_AVAILABLE";
+  if (["Pending System Submission", "Pending Bank Approval", "Active", "Expired"].includes(c.status)) return "ALREADY_SIGNED";
+  if (c.status === "Link Expired" || c.status === "Request Expired") return "EXPIRED";
   if (c.reviewLinkExpiresAt && diffDays(ddToday(), parseNiceDate(c.reviewLinkExpiresAt)) < 0) return "EXPIRED";
   return "OTP_REQUIRED";
 }

@@ -482,6 +482,8 @@ const DD12_START = shiftMonthsIso(DD12_P2, -1);
 const DD13_START = relIso(-14);
 // dd14 — amend demo: #1 paid 20 days ago, 11 upcoming collections to amend.
 const DD14_START = relIso(-20);
+// dd15 — #1 paid a month before #2; #2 (due 3 days ago) came back in Error and is still inside its retry window.
+const DD15_START = shiftMonthsIso(relIso(-3), -1);
 
 function genOccurrences(
   isoStart: string,
@@ -988,4 +990,180 @@ export const directDebitContracts: DirectDebitContract[] = [
       1: { status: "Paid", rolledOver: "none", collectedOn: nice(DD14_START), payoutStatus: "Settled", reasonCode: "0" },
     }),
   },
+  // dd15 — new 14-Oct-2026 (Confluence v2.5 B8 / S6): a collection that came back ERR (Error) can
+  // now be retried, within the same 3 retries and retry deadline, when the debit it would get keeps
+  // the DDS minimum gap from the previous actual debit.
+  {
+    id: "dd15",
+    ref: "DD-2026-00158",
+    merchantRef: "INV-2026-09105",
+    contractDescription: "Monthly school transport fee, 2026/27.",
+    createdOn: formatCreatedOn(addDays(parseDateStr(DD15_START), -9)),
+    customerName: "Error Collection", // demo: #2 in Error, retryable (v2.5)
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1991-2233445-6",
+    customerEmail: "r.saleh@example.com",
+    customerMobile: "0507766554",
+    instrumentType: "Bank Account",
+    bankName: "Commercial Bank of Dubai",
+    maskedInstrumentRef: "•••7720",
+    commencesOn: nice(DD15_START),
+    expiresOn: nice(shiftMonthsIso(DD15_START, 10)),
+    frequency: "Monthly",
+    amountType: "Fixed",
+    minAmount: 1500,
+    maxAmount: 1500,
+    prevDeduction: { amount: 1500, date: nice(shiftMonthsIso(DD15_START, 1)), ok: false },
+    nextDue: { amount: 1500, date: nice(shiftMonthsIso(DD15_START, 2)) },
+    rolloverEnabled: false,
+    rolloversAllowed: 0,
+    rolloverRemaining: 0,
+    status: "Active",
+    subscriptionStatus: "Active",
+    occurrences: genOccurrences(DD15_START, "Monthly", 10, 1500, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: nice(DD15_START), payoutStatus: "Settled", reasonCode: "0" },
+      2: { status: "Error", rolledOver: "none", retryCount: 0, payoutStatus: "—", note: "DDS returned ERR (technical error at DDS / Central Bank) — can be retried (v2.5)" },
+    }),
+  },
+  // dd16 — signed, on its way to the bank (DD Pending System Submission, SUBP — US-14).
+  {
+    id: "dd16",
+    ref: "DD-2026-00160",
+    merchantRef: "INV-2026-09140",
+    contractDescription: "Quarterly service charge — Tower B, Apt 1708.",
+    createdOn: formatCreatedOn(addDays(parseDateStr(relIso(0)), -1)),
+    customerName: "Signed Today",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1987-9988776-5",
+    customerEmail: "n.farouk@example.com",
+    customerMobile: "0581122334",
+    instrumentType: "Bank Account",
+    bankName: "Emirates Islamic Bank",
+    maskedInstrumentRef: "•••3390",
+    commencesOn: nice(relIso(10)),
+    expiresOn: nice(shiftMonthsIso(relIso(10), 12)),
+    frequency: "Quarterly",
+    amountType: "Fixed",
+    minAmount: 6200,
+    maxAmount: 6200,
+    rolloverEnabled: false,
+    rolloversAllowed: 0,
+    rolloverRemaining: 0,
+    status: "Pending System Submission",
+    subscriptionStatus: "Active",
+    statusNote: "Signed with UAE PASS — on its way to the customer's bank (up to 3 working days)",
+    occurrences: genOccurrences(relIso(14), "Quarterly", 4, 6200),
+  },
+  // dd19 — DD Pending (added 14-Oct-2026): registered at DDS, waiting for the customer to sign.
+  // Shows Resend (extends the link) and Discard (discarded at DDS too).
+  {
+    id: "dd19",
+    ref: "DD-2026-00171",
+    merchantRef: "INV-2026-09201",
+    contractDescription: "Monthly gym membership — Marina branch.",
+    createdOn: formatCreatedOn(addDays(parseDateStr(relIso(0)), -2)),
+    customerName: "Awaiting Signature",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1991-2233445-6",
+    customerEmail: "r.saleh@example.com",
+    customerMobile: "0507788990",
+    instrumentType: "Bank Account",
+    bankName: "Emiratesnbd Bank PJSC",
+    maskedInstrumentRef: "•••7741",
+    commencesOn: nice(relIso(8)),
+    expiresOn: nice(shiftMonthsIso(relIso(8), 12)),
+    frequency: "Monthly",
+    amountType: "Fixed",
+    minAmount: 450,
+    maxAmount: 450,
+    rolloverEnabled: false,
+    rolloversAllowed: 0,
+    rolloverRemaining: 0,
+    status: "Pending Customer Sign",
+    subscriptionStatus: "Active",
+    signingNotificationCount: 1,
+    reviewLinkExpiresAt: `${nice(relIso(5))}, 11:59 PM`,
+    occurrences: genOccurrences(relIso(10), "Monthly", 12, 450),
+  },
+  // dd17 — Not Submitted (US-13): DDS refused the create request. Correct and resubmit with the
+  // same reference, or discard.
+  {
+    id: "dd17",
+    ref: "",
+    merchantRef: "INV-2026-09166",
+    contractDescription: "Monthly parking fee — Level P2, bay 41.",
+    createdOn: formatCreatedOn(new Date()),
+    customerName: "DDS Refused Create",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1993-4455667-8",
+    customerEmail: "a.khan@example.com",
+    customerMobile: "0566677889",
+    instrumentType: "Bank Account",
+    bankName: "Ajman Bank",
+    maskedInstrumentRef: "•••0047",
+    commencesOn: nice(relIso(7)),
+    expiresOn: nice(shiftMonthsIso(relIso(7), 6)),
+    frequency: "Monthly",
+    amountType: "Fixed",
+    minAmount: 400,
+    maxAmount: 400,
+    rolloverEnabled: false,
+    rolloversAllowed: 0,
+    rolloverRemaining: 0,
+    status: "Not Submitted",
+    notSubmittedKind: "rejected",
+    notSubmittedReason: "DDS: IBAN does not belong to the selected bank (validation error on customerIban).",
+    subscriptionStatus: "Cancelled",
+    occurrences: [],
+    emptyNote: "No collections — the contract was not registered with DDS.",
+  },
+  // dd18 — DD Error (mandate ERR — final): merchant creates a new contract.
+  {
+    id: "dd18",
+    ref: "DD-2026-00149",
+    merchantRef: "INV-2026-08990",
+    contractDescription: "Monthly nursery fee, Term 1.",
+    createdOn: formatCreatedOn(addDays(parseDateStr(relIso(0)), -12)),
+    customerName: "Mandate Error",
+    customerIdType: "Emirates ID",
+    customerIdNumber: "784-1996-1212343-4",
+    customerEmail: "h.ali@example.com",
+    customerMobile: "0523344556",
+    instrumentType: "Bank Account",
+    bankName: "National Bank of Fujairah PJSC",
+    maskedInstrumentRef: "•••5512",
+    commencesOn: nice(relIso(-5)),
+    expiresOn: nice(shiftMonthsIso(relIso(-5), 4)),
+    frequency: "Monthly",
+    amountType: "Fixed",
+    minAmount: 2100,
+    maxAmount: 2100,
+    rolloverEnabled: false,
+    rolloversAllowed: 0,
+    rolloverRemaining: 0,
+    status: "Error",
+    mandateReason: "Error at DDS / Central Bank while registering the mandate",
+    subscriptionStatus: "Cancelled",
+    occurrences: genOccurrences(relIso(10), "Monthly", 4, 2100, Object.fromEntries([1, 2, 3, 4].map((n) => [n, { status: "Cancelled" as const }]))),
+    cancelledNote: "Mandate ended in DD Error — create a new contract.",
+  },
 ];
+
+// Stores (MIDs) — every contract belongs to exactly one store (B16, 14-Oct-2026).
+export const DD_STORES = [
+  { id: "20000481203", name: "Acme Retail — Dubai Mall" },
+  { id: "20000481202", name: "Acme Retail — Marina" },
+  { id: "10002182201", name: "Acme Retail — Online" },
+];
+directDebitContracts.forEach((c, i) => {
+  // 14-Oct-2026 (decision 11): bank-account demo contracts carry a full IBAN, shown in full.
+  if (c.instrumentType === "Bank Account" && c.maskedInstrumentRef.startsWith("•••")) {
+    const last4 = c.maskedInstrumentRef.replace(/\D/g, "").padStart(4, "0");
+    c.maskedInstrumentRef = `AE07033${String(100000000000 + i * 7919)}${last4}`;
+  }
+  if (!c.storeId) {
+    const s = DD_STORES[i % DD_STORES.length];
+    c.storeId = s.id;
+    c.storeName = s.name;
+  }
+});

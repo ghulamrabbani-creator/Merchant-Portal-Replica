@@ -1,4 +1,4 @@
-import { DD_FREQUENCIES, DDAmountType, DDFrequency, DDSubscriptionStatus, DirectDebitContract, DirectDebitOccurrence } from "./types";
+import { DD_FREQUENCIES, DDActivityEvent, DDAmountType, DDContractStatus, DDFrequency, DDSubscriptionStatus, DirectDebitContract, DirectDebitOccurrence } from "./types";
 
 // Ported from the Direct Debit Contracts design canvas (Create Contracts & Subscription flow).
 // Central Bank rule: no more than one collection per the mandate's own payment_frequency period —
@@ -270,6 +270,23 @@ export function maskInstrumentRef(raw: string): string {
   return `•••${last4}`;
 }
 
+/** Instrument as stored and shown (14-Oct-2026, Confluence v2.6 / Backlog v2.1 decision 11): the IBAN
+ *  is kept and shown in full; a card is masked to its last 4 (the full number lives in Geidea's token
+ *  vault). */
+export function instrumentRefFor(type: "Bank Account" | "Credit Card", raw: string): string {
+  return type === "Bank Account" ? raw.replace(/\s/g, "").toUpperCase() : maskInstrumentRef(raw);
+}
+/** Display form: a full IBAN grouped in fours ("AE07 0331 …"); anything else as stored. */
+export function formatInstrumentRef(ref: string): string {
+  return /^AE\d{21}$/.test(ref) ? ref.replace(/(.{4})/g, "$1 ").trim() : ref;
+}
+/** Central Bank reference (cbDdaRefNo) — issued once the mandate is DD Active. Prototype: derived. */
+export function centralBankRef(c: { id: string; status: string }): string | null {
+  if (!["Active", "Expired", "Cancelled"].includes(c.status)) return null;
+  const n = c.id.replace(/\D/g, "").slice(-9).padStart(9, "0");
+  return `29000003662026${n}`;
+}
+
 /** "createdOn" timestamp in the same "28 Aug 2026, 10:15 AM" format used throughout mock data. */
 export function formatCreatedOn(d: Date): string {
   let hours = d.getHours();
@@ -322,10 +339,150 @@ export function reasonLabel(code?: string): string {
   return DDS_REASON_CODES[code] ?? `Reason ${code}`;
 }
 
-/** "Cancelled — Account closed" (Mandate.status_label for a terminal-refusal closure). */
+// ---- One status list (14-Oct-2026, MP Backlog v2 US-14 / Confluence v2.5 S10 §3) ----
+// DDS statuses carry the "DD" tag; Geidea-only statuses carry none. A contract closed by Geidea
+// after a terminal refusal shows "Cancelled — <reason>" (no tag).
+const DD_LABEL: Record<DDContractStatus, string> = {
+  "Awaiting Customer Details": "Awaiting Customer Details",
+  "Not Submitted": "Not Submitted",
+  "Link Expired": "Link Expired",
+  Discarded: "Discarded",
+  "Pending Customer Sign": "DD Pending",
+  "Pending System Submission": "DD Pending System Submission",
+  "Pending Bank Approval": "DD Pending Bank Approval",
+  Active: "DD Active",
+  Rejected: "DD Rejected",
+  Denied: "DD Denied",
+  "Request Expired": "DD Request Expired",
+  Error: "DD Error",
+  Cancelled: "DD Cancelled",
+  Expired: "DD Expired",
+};
+
+/** The merchant-facing label: "DD Active", "Awaiting Customer Details", "Cancelled — Account closed"… */
 export function contractStatusLabel(c: Pick<DirectDebitContract, "status" | "closureReasonCode">): string {
   if (c.status === "Cancelled" && c.closureReasonCode) return `Cancelled — ${reasonLabel(c.closureReasonCode)}`;
-  return c.status;
+  return DD_LABEL[c.status] ?? c.status;
+}
+
+/** Filter options, in lifecycle order (US-05). */
+export const DD_STATUS_FILTER: { status: DDContractStatus; label: string }[] = (
+  [
+    "Awaiting Customer Details",
+    "Not Submitted",
+    "Pending Customer Sign",
+    "Pending System Submission",
+    "Pending Bank Approval",
+    "Active",
+    "Rejected",
+    "Denied",
+    "Request Expired",
+    "Error",
+    "Link Expired",
+    "Discarded",
+    "Cancelled",
+    "Expired",
+  ] as DDContractStatus[]
+).map((status) => ({ status, label: DD_LABEL[status] }));
+
+/** Statuses where the customer hasn't signed yet — Resend and Discard apply (US-15, US-34). */
+export function isUnsigned(status: DDContractStatus): boolean {
+  return status === "Awaiting Customer Details" || status === "Pending Customer Sign";
+}
+/** Discard allowed (US-34): Awaiting Customer Details, Not Submitted, DD Pending, DD Request Expired. */
+export function canDiscard(status: DDContractStatus): boolean {
+  return isUnsigned(status) || status === "Not Submitted" || status === "Request Expired";
+}
+/** Terminal contract statuses — no action creates a new collection (US-17). */
+export function isClosedStatus(status: DDContractStatus): boolean {
+  return ["Not Submitted", "Link Expired", "Discarded", "Rejected", "Denied", "Request Expired", "Error", "Cancelled", "Expired"].includes(status);
+}
+
+/** Resend (US-15): extends the link to the end of day, today + 7 days; for DD Pending never beyond
+ *  created + 7 working days (DDS's own expiry). Returns the new expiry as display text. */
+export function resendLinkExpiry(createdOn: string, status: DDContractStatus, reviewExpiryDays = 7, today: Date = ddToday()): string {
+  let exp = addDays(today, reviewExpiryDays);
+  if (status === "Pending Customer Sign") {
+    const created = parseNiceDate(createdOn);
+    if (!isNaN(created.getTime())) {
+      const ddsCap = addWorkingDays(created, 7);
+      if (ddsCap < exp) exp = ddsCap;
+    }
+  }
+  return `${formatDateNice(exp)}, 11:59 PM`;
+}
+
+/** True once the review link's last day has passed (US-15: resend refused, link refused). */
+export function isLinkExpired(reviewLinkExpiresAt?: string, today: Date = ddToday()): boolean {
+  if (!reviewLinkExpiresAt) return false;
+  const d = parseNiceDate(reviewLinkExpiresAt);
+  return !isNaN(d.getTime()) && diffDays(d, today) > 0;
+}
+
+/** Outstanding (US-17): Scheduled + Failed, excluding rolled-over and Skipped amounts. */
+export function outstandingAmount(occurrences: DirectDebitOccurrence[]): number {
+  return occurrences
+    .filter((o) => (o.status === "Scheduled" || o.status === "Failed") && o.rolledOver !== "rolled_over")
+    .reduce((sum, o) => sum + o.amount, 0);
+}
+
+/** Bounce memo (US-26): available for any payment rejected at least once. */
+export function hasBounceMemo(o: DirectDebitOccurrence): boolean {
+  if (isTerminalReasonCode(o.reasonCode) && o.status === "Failed") return true;
+  return o.status === "Rejected" || o.status === "Error" || o.status === "Failed" || (o.retryCount ?? 0) > 0;
+}
+
+// ---- Field validation (14-Oct-2026, MP Backlog v2 US-07/US-08; Confluence S2 V-rules) ----
+export const MERCHANT_REF_PATTERN = /^[A-Za-z0-9\-\/:._ ]{3,26}$/;
+export function validateMerchantRef(ref: string, existing: { merchantRef: string }[]): string | null {
+  const v = ref.trim();
+  if (!v) return "Merchant reference is required.";
+  if (v.length < 3 || v.length > 26) return "3 to 26 characters.";
+  if (!MERCHANT_REF_PATTERN.test(v)) return "Use letters, digits, space and - / : . _ only.";
+  if (existing.some((c) => c.merchantRef.trim().toLowerCase() === v.toLowerCase()))
+    return "This reference is already used under Geidea's OIC — references are unique across all merchants and stay used after a discard.";
+  return null;
+}
+export function validateEmiratesId(eid: string): string | null {
+  const d = eid.replace(/\D/g, "");
+  if (d.length !== 15 || !d.startsWith("784")) return "15 digits starting with 784.";
+  return null;
+}
+export function validateUaeMobile(m: string): string | null {
+  return /^05\d{8}$/.test(m.replace(/\s/g, "")) ? null : "UAE mobile, format 05XXXXXXXX.";
+}
+export function validateName(n: string, label = "Name"): string | null {
+  const words = n.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return `${label} is required.`;
+  if (words.length > 7) return `${label}: at most 7 words.`;
+  return null;
+}
+export function validateIban(iban: string): string | null {
+  return /^AE\d{21}$/.test(iban.replace(/\s/g, "").toUpperCase()) ? null : "IBAN: AE followed by 21 digits.";
+}
+export function luhnOk(num: string): boolean {
+  const d = num.replace(/\D/g, "");
+  let sum = 0;
+  for (let i = 0; i < d.length; i++) {
+    let n = parseInt(d[d.length - 1 - i], 10);
+    if (i % 2 === 1) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+  }
+  return d.length > 0 && sum % 10 === 0;
+}
+export function validateCardNumber(num: string): string | null {
+  const d = num.replace(/\s/g, "");
+  if (!/^\d{16}$/.test(d)) return "Card number: 16 digits.";
+  if (!luhnOk(d)) return "Card number fails the check-digit (Luhn) test.";
+  return null;
+}
+
+// ---- Activity history (US-32) ----
+export function activityEvent(actor: string, text: string, at: Date = new Date()): DDActivityEvent {
+  return { at: formatCreatedOn(at), actor, text };
 }
 
 // ---- Retry deadline (Backend Stories S6 §1.2) ----
@@ -365,7 +522,8 @@ export type RetryBlockedReason =
   | "RETRIES_EXHAUSTED"
   | "RETRY_WINDOW_CLOSED"
   | "CONTRACT_NOT_ACTIVE"
-  | "SUBSCRIPTION_PAUSED";
+  | "SUBSCRIPTION_PAUSED"
+  | "MIN_GAP_NOT_MET";
 
 /** S6 §1.1 — every check the Backend runs before accepting a retry, in the same order, so the
  *  portal can disable the button with the matching reason instead of letting it fail. */
@@ -380,24 +538,39 @@ export function retryEligibility(
   const deadline = retryDeadline(contract, occurrences, o.seq);
   if (!allowRetryToggle) return { allowed: false, reason: "ACTION_NOT_ALLOWED", deadline };
   if (o.paymentStatus === "RPND") return { allowed: false, reason: "RETRY_IN_PROGRESS", deadline };
-  if (o.status !== "Rejected") return { allowed: false, reason: "NOT_RETRYABLE", deadline };
+  if (o.status !== "Rejected" && o.status !== "Error") return { allowed: false, reason: "NOT_RETRYABLE", deadline };
   if (isTerminalReasonCode(o.reasonCode)) return { allowed: false, reason: "TERMINAL_REASON", deadline };
   if ((o.retryCount ?? 0) >= RETRY_CAP) return { allowed: false, reason: "RETRIES_EXHAUSTED", deadline };
   if (deadline && diffDays(today, deadline) < 0) return { allowed: false, reason: "RETRY_WINDOW_CLOSED", deadline };
   if (contract.status !== "Active") return { allowed: false, reason: "CONTRACT_NOT_ACTIVE", deadline };
   if (subscriptionStatus === "Paused") return { allowed: false, reason: "SUBSCRIPTION_PAUSED", deadline };
+  // v2.5: an Error collection is retried only if the debit it would get (next working day) keeps
+  // DDS's minimum gap from the previous actual debit — an ERR from a frequency mismatch cannot be
+  // represented until that is corrected.
+  if (o.status === "Error") {
+    const prevPaid = occurrences
+      .filter((x) => x.seq < o.seq && x.status === "Paid")
+      .sort((a, b) => b.seq - a.seq)[0];
+    if (prevPaid) {
+      const ref = parseNiceDate(prevPaid.collectedOn ?? prevPaid.dueDate);
+      const debit = nextWorkingDayOnOrAfter(addDays(today, 1));
+      if (!isNaN(ref.getTime()) && diffDays(ref, debit) < minGapDays(contract.frequency))
+        return { allowed: false, reason: "MIN_GAP_NOT_MET", deadline };
+    }
+  }
   return { allowed: true, deadline };
 }
 
 export const RETRY_BLOCKED_TEXT: Record<RetryBlockedReason, string> = {
-  ACTION_NOT_ALLOWED: "Retry is switched off for this merchant (allow_retry_collection = false).",
-  NOT_RETRYABLE: "Only a Rejected collection can be retried.",
+  ACTION_NOT_ALLOWED: "Your role doesn't include the Retry Collection permission.",
+  NOT_RETRYABLE: "Only a Rejected or Error collection can be retried. Failed is final.",
   TERMINAL_REASON: "Terminal refusal reason — a retry cannot help. The contract has been closed.",
   RETRY_IN_PROGRESS: "A retry is already with DDS (Representment Pending).",
   RETRIES_EXHAUSTED: `All ${RETRY_CAP} retries have been used.`,
   RETRY_WINDOW_CLOSED: "The retry deadline has passed — a later retry could break DDS's minimum gap before the next collection.",
   CONTRACT_NOT_ACTIVE: "The contract is not Active.",
   SUBSCRIPTION_PAUSED: "The subscription is paused — resume it first.",
+  MIN_GAP_NOT_MET: "A retry now would land too close to the previous debit (DDS minimum gap) — DDS would reject it again.",
 };
 
 // ---- Schedule amend validation (Backend Stories S7 §2.2, rules A0–A13) ----
@@ -441,7 +614,7 @@ export function validateAmend(
   const errors: AmendError[] = [];
   const gap = minGapDays(contract.frequency);
 
-  if (!allowEditToggle) errors.push({ seq: null, code: "ACTION_NOT_ALLOWED", message: "Amending collections is switched off for this merchant (allow_edit_collection = false)." });
+  if (!allowEditToggle) errors.push({ seq: null, code: "ACTION_NOT_ALLOWED", message: "Your role doesn't include the Amend Collection permission." });
   if (contract.status !== "Active" || subscriptionStatus === "Cancelled")
     errors.push({ seq: null, code: "CONTRACT_NOT_ACTIVE", message: "The contract must be Active and the subscription Active or Paused." });
   const ids = changes.map((c) => c.seq);

@@ -7,11 +7,15 @@ import clsx from "clsx";
 export default function SearchBar({
   scopes,
   placeholder = "Search",
+  onChange,
 }: {
   scopes: string[];
   placeholder?: string;
+  /** Optional (added 14-Oct-2026 for Direct Debit search): called with the scope and text. */
+  onChange?: (scope: string, text: string) => void;
 }) {
   const [scope, setScope] = useState(scopes[0]);
+  const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
 
   return (
@@ -32,6 +36,7 @@ export default function SearchBar({
                 onClick={() => {
                   setScope(s);
                   setOpen(false);
+                  onChange?.(s, text);
                 }}
                 className={clsx(
                   "block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-page-bg",
@@ -48,6 +53,11 @@ export default function SearchBar({
       </div>
       <div className="relative">
         <input
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            onChange?.(scope, e.target.value);
+          }}
           placeholder={placeholder}
           className="h-full w-[180px] rounded-r-lg border border-border-color px-3 py-2.5 text-sm outline-none placeholder:text-text-muted"
         />

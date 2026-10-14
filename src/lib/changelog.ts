@@ -15,7 +15,7 @@ export interface ChangelogEntry {
   description: string;
 }
 
-export const LAST_UPDATED = "25 Sep 2026";
+export const LAST_UPDATED = "14 Oct 2026";
 
 // Full history below covers Direct Debit specifically, back to its first release on the portal
 // (01 Sep 2026) — compiled 09 Sep 2026 from the repo's commit history across every session so far.
@@ -27,6 +27,11 @@ export const LAST_UPDATED = "25 Sep 2026";
 // pass on GitHub. Corrected back to match the actual shipped code (customer picks under TBFC,
 // confirmed live by Rabbani on 10-Sep-2026) rather than silently left stale.
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    date: "14 Oct 2026",
+    description:
+      "Direct Debit aligned to MP Backlog v2 and Confluence v2.5. (1) Role (prototype) switcher in the top bar replaces the per-merchant action toggles — Business admin, Operator, Viewer, Bulk maker, Bulk checker; each button follows the role's permissions. PGW Config drops the OIC choice (Geidea OIC only), the notification-suppression switch and the action toggles. (2) Statuses: one DD-tagged list (DD Pending, DD Active, DD Rejected, DD Error…) plus Not Submitted, Pending System Submission, Link Expired and Discarded; Suspended and Completed removed. (3) Contract List: KPIs computed from the contracts in view (Total Collections = Paid only, Failed = Failed only, Declined = Rejected + Denied + Error) and hidden while searching; working search, filters (all DDS frequencies) and store selector (Store column when more than one store); row menu with View, Resend and Discard. (4) Contract Detail: Cancel mandate removed; Discard, Edit notes, Resend that extends the link, signed/unsigned contract download, contract description, store, Not Submitted banner and activity history added; Pause asks for an optional reason. (5) Collections: Error is retryable (checked against the DDS minimum gap), Failed is final; bounce memo download. (6) Create: field rules (reference 3–26 and unique, Emirates ID, mobile, name up to 7 words, IBAN, card Luhn), store picker, and a prototype DDS answer (Accepted / Refused / No answer → Not Submitted). (7) Customer page: signing lands on Pending System Submission, UAE PASS signing-password tip, four signing outcomes with Try again, signed-contract download. (8) Later the same day (Backlog v2.1 / Confluence v2.6): KPI cards always cover every contract in the selected stores (filters and search don't change them); the IBAN is shown in full everywhere, cards stay masked; Contract Detail is titled by the merchant reference (it is the DDS reference) and shows the Central Bank reference once DD Active.",
+  },
   {
     date: "25 Sep 2026",
     description:

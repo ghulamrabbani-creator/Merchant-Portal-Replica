@@ -33,6 +33,21 @@ const colorMap: Record<string, string> = {
   Skipped: "bg-status-submitted",
   // Added 25-Sep-2026 (Backend Stories S5/S6): a retry in flight at DDS (Payment status RPND).
   "Representment Pending": "bg-status-pending",
+  // Direct Debit one status list (14-Oct-2026): DD-tagged DDS statuses + Geidea-only statuses.
+  "DD Active": "bg-status-approved",
+  "DD Pending": "bg-status-pending",
+  "DD Pending System Submission": "bg-status-pending",
+  "DD Pending Bank Approval": "bg-status-pending",
+  "DD Rejected": "bg-status-declined",
+  "DD Denied": "bg-status-declined",
+  "DD Request Expired": "bg-status-declined",
+  "DD Error": "bg-status-declined",
+  "DD Cancelled": "bg-status-declined",
+  "DD Expired": "bg-status-declined",
+  "Not Submitted": "bg-status-declined",
+  "Link Expired": "bg-status-declined",
+  Discarded: "bg-status-submitted",
+  Error: "bg-status-declined",
 };
 
 export default function StatusDot({ status }: { status: string }) {

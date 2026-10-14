@@ -12,9 +12,12 @@
 //  - New Retry deadline column (S6 §1.2): next collection's due date − DDS min gap − 1 working day.
 //  - Status shows the DDS reason label (S5 §3.3), the skip reason, and "Representment Pending"
 //    while a retry is with DDS.
+// 14-Oct-2026 (MP Backlog v2 US-18/US-22/US-26): an Error collection is retryable like Rejected
+// (Failed stays final); reasons show on Rejected / Error / Failed; a bounce memo download appears on
+// any collection rejected at least once; Retry is gated by the role's Retry permission.
 
 import clsx from "clsx";
-import { AlertTriangle, RotateCw } from "lucide-react";
+import { AlertTriangle, FileDown, RotateCw } from "lucide-react";
 import StatusDot from "@/components/ui/StatusDot";
 import FieldHint from "@/components/directdebit/FieldHint";
 import { useDDConfig } from "@/lib/dd-config-context";
@@ -26,6 +29,7 @@ import {
   diffDays,
   formatDateNice,
   formatMoneyAED,
+  hasBounceMemo,
   isTerminalReasonCode,
   parseNiceDate,
   reasonLabel,
@@ -79,7 +83,7 @@ export default function CollectionTable({
   onSimulate?: (seq: number, result: "ACCP" | "RJCT") => void;
   headerBg?: string;
 }) {
-  const { config, devHints } = useDDConfig();
+  const { can, devHints } = useDDConfig();
   const today = ddToday();
 
   function statusCell(o: DirectDebitOccurrence) {
@@ -87,7 +91,7 @@ export default function CollectionTable({
     return (
       <>
         <StatusDot status={inRetry ? "Representment Pending" : o.status} />
-        {(o.status === "Rejected" || o.status === "Failed") && o.reasonCode && o.reasonCode !== "0" && (
+        {(o.status === "Rejected" || o.status === "Failed" || o.status === "Error") && o.reasonCode && o.reasonCode !== "0" && (
           <div
             className={clsx(
               "mt-0.5 max-w-[260px] text-[11px]",
@@ -117,7 +121,7 @@ export default function CollectionTable({
     const due = parseNiceDate(o.dueDate);
     const left = diffDays(today, d);
     const noWindow = diffDays(due, d) <= 0;
-    if (o.status === "Rejected" || o.paymentStatus === "RPND") {
+    if (o.status === "Rejected" || o.status === "Error" || o.paymentStatus === "RPND") {
       return (
         <div>
           <div className={clsx("font-medium", left < 0 ? "text-status-expired" : "text-text-primary")}>{formatDateNice(d)}</div>
@@ -159,10 +163,21 @@ export default function CollectionTable({
         </div>
       );
     }
-    if (o.status !== "Rejected") return null;
-    const e = retryEligibility(contract, subscriptionStatus, occurrences, o, config.actions.allowRetryCollection, today);
+    const memo = hasBounceMemo(o) ? (
+      <a
+        href={`data:text/plain;charset=utf-8,${encodeURIComponent(`BOUNCE MEMO (prototype)\nContract: ${contract.merchantRef}\nCollection #${o.seq} due ${o.dueDate}\nReason: ${o.reasonCode ?? "—"} ${reasonLabel(o.reasonCode)}`)}`}
+        download={`${contract.merchantRef}-${o.seq}-bounce-memo.txt`}
+        className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-blue hover:underline"
+        data-testid={`bounce-memo-${o.seq}`}
+      >
+        <FileDown size={12} /> Bounce memo
+      </a>
+    ) : null;
+    if (o.status !== "Rejected" && o.status !== "Error") return memo;
+    const e = retryEligibility(contract, subscriptionStatus, occurrences, o, can("retry"), today);
     const count = o.retryCount ?? 0;
     return (
+      <div className="flex flex-col items-start gap-1">
       <div className="flex items-center gap-1">
         <button
           onClick={() => e.allowed && onRetry(o.seq)}
@@ -180,6 +195,8 @@ export default function CollectionTable({
           Retry ({count} of {RETRY_CAP})
         </button>
         <FieldHint k="act.retry" value={e.allowed ? "allowed" : e.reason} />
+      </div>
+      {memo}
       </div>
     );
   }

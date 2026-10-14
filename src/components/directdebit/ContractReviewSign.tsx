@@ -14,9 +14,15 @@ import {
   formatMoneyAED,
   maskEmiratesId,
   maskInstrumentRef,
+  instrumentRefFor,
+  formatInstrumentRef,
   maskMobile,
   nextContractRef,
   PENDING_INSTRUMENT_REF_LABEL,
+  activityEvent,
+  validateCardNumber,
+  validateIban,
+  validateName,
 } from "@/lib/direct-debit";
 import { DDBankAccountType, DDInstrumentType, DDS_BANKS, DirectDebitContract } from "@/lib/types";
 import { useDDConfig } from "@/lib/dd-config-context";
@@ -28,7 +34,12 @@ import { CustomerPageHeader } from "@/components/directdebit/CustomerVerificatio
 // instrument details for the customer to supply — see Notes/Projects/Direct Debit.md, "To Be
 // Filled By Customer (TBFC) instrument flow." Create DDA is only called once this step commits,
 // which is also when a real mandate reference first exists (see PENDING_INSTRUMENT_REF_LABEL).
-type SignStep = "instrument" | "review" | "fetching" | "unsigned" | "signing" | "signed";
+// 14-Oct-2026 (MP Backlog v2 US-33): signing now ends in one of four outcomes (simulated with the
+// dev picker on the "unsigned" step) and a successful signature lands on Pending System Submission
+// (Geidea submits the signed contract to DDS; DD Pending Bank Approval follows), not straight on
+// Pending Bank Approval.
+type SignStep = "instrument" | "review" | "fetching" | "unsigned" | "signing" | "signed" | "sign_failed" | "iban_failed" | "not_completed";
+type SignOutcome = "signed" | "sign_failed" | "iban_failed" | "not_completed";
 
 export default function ContractReviewSign({ contract }: { contract: DirectDebitContract }) {
   const id = contract.id;
@@ -37,6 +48,7 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
   const [step, setStep] = useState<SignStep>(
     found?.mandateCreationStage === "awaiting_customer_instrument" ? "instrument" : "review"
   );
+  const [outcome, setOutcome] = useState<SignOutcome>("signed");
 
   // TBFC instrument-capture form state. Corrected 09-Sep-2026 (Rabbani): under TBFC the whole
   // instrument choice — which TYPE, not just its account/card details — belongs to the customer,
@@ -67,17 +79,19 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
     }
     if (step === "signing") {
       const t = setTimeout(() => {
-        setStep("signed");
-        // DDS status after signing: SUBP → label "Pending Bank Approval" (S3 §7.3).
+        setStep(outcome);
+        if (outcome !== "signed") return;
+        // After a successful signature: Pending System Submission (14-Oct-2026, US-33/US-14).
         const target = directDebitContracts.find((x) => x.id === id);
         if (target) {
-          target.status = "Pending Bank Approval";
+          target.status = "Pending System Submission";
+          target.activity = [activityEvent("Customer", "Contract signed via UAE PASS"), ...(target.activity ?? [])];
           persistIfCreated(target);
         }
       }, 1600);
       return () => clearTimeout(t);
     }
-  }, [step, id]);
+  }, [step, id, outcome]);
 
   const c = found;
 
@@ -95,7 +109,7 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
       target.bankName = instBankName;
       target.bankAccountType = instAccountType;
       target.accountHolderTitle = instAccountHolderTitle;
-      target.maskedInstrumentRef = maskInstrumentRef(instIban);
+      target.maskedInstrumentRef = instrumentRefFor("Bank Account", instIban);
     } else {
       target.bankName = instIssuingBank;
       target.maskedInstrumentRef = maskInstrumentRef(instCardNumber);
@@ -107,10 +121,17 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
     setStep("review");
   }
 
-  const instrumentValid =
+  // Field rules (14-Oct-2026, US-33): IBAN = AE + 21 digits; card number passes the Luhn check;
+  // names up to 7 words.
+  const instError =
     effectiveCustInstrumentType === "Bank Account"
+      ? (instIban.trim() && validateIban(instIban)) || (instAccountHolderTitle.trim() && validateName(instAccountHolderTitle, "Account title"))
+      : (instCardNumber.trim() && validateCardNumber(instCardNumber)) || (instCardHolderName.trim() && validateName(instCardHolderName, "Card holder name"));
+  const instrumentValid =
+    !instError &&
+    (effectiveCustInstrumentType === "Bank Account"
       ? instIban.trim() && instAccountHolderTitle.trim()
-      : instCardNumber.trim() && instCardHolderName.trim();
+      : instCardNumber.trim() && instCardHolderName.trim());
 
   return (
     <div>
@@ -179,7 +200,7 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
                 c.maskedInstrumentRef ? (
                   <span className="inline-flex items-center gap-1.5">
                     {c.instrumentType === "Bank Account" ? <Landmark size={13} /> : <CreditCard size={13} />}
-                    {c.instrumentType} {c.maskedInstrumentRef}
+                    {c.instrumentType} {formatInstrumentRef(c.maskedInstrumentRef)}
                     {c.bankName ? `, ${c.bankName}` : ""}
                   </span>
                 ) : (
@@ -361,6 +382,7 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
                   </div>
                 </>
               )}
+              {instError && <p className="mb-3 text-[12.5px] text-status-declined" data-testid="instrument-error">{instError}</p>}
               <button
                 onClick={handleSubmitInstrument}
                 disabled={!instrumentValid}
@@ -392,9 +414,29 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
           {step === "unsigned" && (
             <>
               <p className="mb-1 text-sm font-medium text-text-primary">Your contract is ready to sign.</p>
-              <p className="mb-4 text-[12.5px] text-text-muted">
+              <p className="mb-2 text-[12.5px] text-text-muted">
                 You&apos;ll be redirected to UAE PASS to complete your digital signature.
               </p>
+              <p className="mx-auto mb-4 max-w-md rounded-lg bg-page-bg px-3 py-2 text-[12.5px] text-text-secondary">
+                Tip: UAE PASS asks for your <b>signing password</b> (set up in the UAE PASS app for digital
+                signatures) — it isn&apos;t your UAE PASS login PIN.
+              </p>
+              <a
+                href={`data:text/plain;charset=utf-8,${encodeURIComponent(`UNSIGNED CONTRACT (prototype)\nMerchant reference: ${c.merchantRef}\nCustomer: ${c.customerName}`)}`}
+                download={`${c.merchantRef}-unsigned.txt`}
+                className="mb-4 inline-flex items-center gap-1.5 text-[12.5px] font-medium text-brand-blue hover:underline"
+              >
+                <FileText size={14} /> Download unsigned contract
+              </a>
+              <div className="mx-auto mb-4 flex max-w-md items-center gap-2 rounded-lg border border-dashed border-fuchsia-400 px-3 py-2 text-[12px] text-fuchsia-700">
+                Prototype — simulate UAE PASS result:
+                <select value={outcome} onChange={(e) => setOutcome(e.target.value as SignOutcome)} className="rounded border border-fuchsia-300 bg-white px-1 py-0.5" data-testid="sign-outcome">
+                  <option value="signed">Signed</option>
+                  <option value="sign_failed">Signing failed</option>
+                  <option value="iban_failed">IBAN verification failed</option>
+                  <option value="not_completed">Customer didn&apos;t complete</option>
+                </select>
+              </div>
               <div className="inline-flex items-center gap-1.5">
                 <button
                   onClick={() => setStep("signing")}
@@ -418,8 +460,38 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
               <CheckCircle2 size={28} />
               <div className="text-sm font-semibold text-text-primary">Contract signed successfully</div>
               <div className="text-[12.5px] text-text-muted">
-                Your bank will review it within up to 3 working days. You can close this page.
+                We&apos;re sending it to your bank, which reviews it within up to 3 working days. You can close this page.
               </div>
+              <a
+                href={`data:text/plain;charset=utf-8,${encodeURIComponent(`SIGNED CONTRACT (prototype)\nMerchant reference: ${c.merchantRef}\nCustomer: ${c.customerName}`)}`}
+                download={`${c.merchantRef}-signed.txt`}
+                className="mt-1 inline-flex items-center gap-1.5 text-[12.5px] font-medium text-brand-blue hover:underline"
+              >
+                <FileText size={14} /> Download signed contract
+              </a>
+            </div>
+          )}
+          {(step === "sign_failed" || step === "iban_failed" || step === "not_completed") && (
+            <div className="flex flex-col items-center gap-2" data-testid={`sign-${step}`}>
+              <div className="text-sm font-semibold text-text-primary">
+                {step === "sign_failed"
+                  ? "Signing didn't go through."
+                  : step === "iban_failed"
+                    ? "Your bank account couldn't be verified."
+                    : "Signing wasn't completed."}
+              </div>
+              <div className="max-w-md text-[12.5px] text-text-muted">
+                {step === "sign_failed"
+                  ? "Something went wrong with UAE PASS. Nothing has been signed — please try again."
+                  : step === "iban_failed"
+                    ? `UAE PASS couldn't confirm the IBAN belongs to you. Contact ${STORE_NAME} to correct the account details.`
+                    : "You left UAE PASS before signing. Your link is still valid — you can sign whenever you're ready."}
+              </div>
+              {step !== "iban_failed" && (
+                <button onClick={() => setStep("unsigned")} className="mt-1 rounded-lg bg-brand-blue px-5 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover">
+                  Try again
+                </button>
+              )}
             </div>
           )}
         </div>

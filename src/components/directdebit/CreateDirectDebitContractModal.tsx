@@ -17,13 +17,20 @@ import {
   formatCreatedOn,
   formatDateNice,
   formatMoneyAED,
-  maskInstrumentRef,
+  instrumentRefFor,
   minGapDays,
   nextContractRef,
   newContractId,
   OccurrenceOverride,
   parseDateStr,
   toDateInputValue,
+  activityEvent,
+  validateCardNumber,
+  validateEmiratesId,
+  validateIban,
+  validateMerchantRef,
+  validateName,
+  validateUaeMobile,
 } from "@/lib/direct-debit";
 import {
   DDAmountType,
@@ -35,7 +42,7 @@ import {
   DirectDebitContract,
   DirectDebitOccurrence,
 } from "@/lib/types";
-import { directDebitContracts } from "@/lib/mock-data";
+import { directDebitContracts, DD_STORES } from "@/lib/mock-data";
 import { saveCreatedContract } from "@/lib/dd-contract-store";
 import FieldHint, { DevHintsFloatingToggle } from "@/components/directdebit/FieldHint";
 import { HintKey } from "@/lib/dd-field-map";
@@ -101,7 +108,12 @@ export default function CreateDirectDebitContractModal({
   const [issuingBank, setIssuingBank] = useState<string>("Emiratesnbd Bank PJSC");
   const [cardNumber, setCardNumber] = useState("4242 4242 4242 4242");
 
-  const [merchantRef, setMerchantRef] = useState("INV-2026-08421");
+  // 14-Oct-2026: default reference is unique per session (references can never be reused, US-07).
+  const [merchantRef, setMerchantRef] = useState(() => `INV-${Date.now().toString().slice(-8)}`);
+  // Store (MID) the contract belongs to — only DD-enabled stores are offered (US-07).
+  const [storeId, setStoreId] = useState(DD_STORES[0].id);
+  // Prototype: what DDS answers to Create DDA (US-13) — success, refused, or no answer in time.
+  const [ddsOutcome, setDdsOutcome] = useState<"success" | "rejected" | "unknown">("success");
   // Customer-facing (Mandate.contract_description, added Sep 2026) — distinct from Notes below,
   // which stays merchant-only. Shown to the customer on the Contract review & sign page in place
   // of merchant reference number, which is meaningless to them. See Notes/Projects/Direct
@@ -188,6 +200,20 @@ export default function CreateDirectDebitContractModal({
   const validateStep = (n: Step): string[] => {
     const errs: string[] = [];
     if (n >= 1) {
+      // Field rules (14-Oct-2026, MP Backlog v2 US-07/US-08; Confluence S2 V-rules).
+      const fieldErrs = [
+        validateMerchantRef(merchantRef, directDebitContracts),
+        contractDescription.length > 500 ? "Contract description: up to 500 characters." : null,
+        notes.length > 1000 ? "Notes: up to 1,000 characters." : null,
+        validateName(customerName, "Customer name"),
+        validateUaeMobile(customerMobile),
+        validateEmiratesId(customerIdNumber),
+        !tbfc && bankActive ? validateIban(iban) : null,
+        !tbfc && bankActive ? validateName(accountHolderTitle, "Account title") : null,
+        !tbfc && !bankActive ? validateCardNumber(cardNumber) : null,
+        !tbfc && !bankActive ? validateName(cardHolderName, "Card holder name") : null,
+      ].filter((x): x is string => !!x);
+      errs.push(...fieldErrs);
       if (maxAmount > config.maxContractAmount)
         errs.push(
           `MAX_AMOUNT_EXCEEDS_LIMIT (V14) — max amount ${formatMoneyAED(maxAmount)} is above this merchant's Maximum Contract Amount of ${formatMoneyAED(config.maxContractAmount)}.`
@@ -365,8 +391,8 @@ export default function CreateDirectDebitContractModal({
       cardHolderName: !tbfc && !bankActive ? cardHolderName : undefined,
       collectionFrequency,
       scheduleVersion: 1,
-      signingNotificationCount: config.suppressCustomerNotifications ? 0 : 1,
-      signingNotificationSentAt: config.suppressCustomerNotifications ? undefined : formatCreatedOn(new Date()),
+      signingNotificationCount: !tbfc && ddsOutcome !== "success" ? 0 : 1,
+      signingNotificationSentAt: !tbfc && ddsOutcome !== "success" ? undefined : formatCreatedOn(new Date()),
       reviewLinkExpiresAt: formatDateNice(addDays(today, config.contractReviewExpiryDays)),
       createRequest,
       // Under TBFC the customer picks the instrument TYPE too (not just its details) on the Sign
@@ -374,7 +400,7 @@ export default function CreateDirectDebitContractModal({
       // pill selection, so the UI can tell "not yet chosen" apart from an actual choice.
       instrumentType: tbfc ? undefined : effectiveInstrumentType,
       bankName: tbfc ? undefined : bankActive ? bankName : issuingBank,
-      maskedInstrumentRef: tbfc ? "" : maskInstrumentRef(bankActive ? iban : cardNumber),
+      maskedInstrumentRef: tbfc ? "" : instrumentRefFor(bankActive ? "Bank Account" : "Credit Card", bankActive ? iban : cardNumber),
       commencesOn: formatDateNice(parseDateStr(commencesOn)),
       expiresOn: formatDateNice(parseDateStr(expiresOn)),
       frequency: frequencyCeiling,
@@ -385,7 +411,13 @@ export default function CreateDirectDebitContractModal({
       rolloverEnabled: effectiveRolloverEnabled,
       rolloversAllowed,
       rolloverRemaining: rolloversAllowed,
-      status: tbfc ? "Awaiting Customer Details" : "Pending Customer Sign",
+      status: tbfc ? "Awaiting Customer Details" : ddsOutcome === "success" ? "Pending Customer Sign" : "Not Submitted",
+      notSubmittedKind: !tbfc && ddsOutcome !== "success" ? ddsOutcome : undefined,
+      notSubmittedReason:
+        !tbfc && ddsOutcome === "rejected" ? "DDS refused Create DDA — the IBAN doesn't match the selected bank (simulated)." : undefined,
+      storeId,
+      storeName: DD_STORES.find((st) => st.id === storeId)?.name,
+      activity: [activityEvent("Merchant user", tbfc ? "Contract created — waiting for the customer's payment details" : ddsOutcome === "success" ? "Contract created and submitted to DDS; signing link sent" : "Contract created — not submitted to DDS")],
       subscriptionStatus: "Active",
       instrumentProvidedBy: tbfc ? "customer" : "merchant",
       mandateCreationStage: tbfc ? "awaiting_customer_instrument" : "submitted_to_dds",
@@ -469,13 +501,30 @@ export default function CreateDirectDebitContractModal({
               </p>
 
               <div className="mb-4">
+                <Label>Store</Label>
+                <select
+                  value={storeId}
+                  onChange={(e) => setStoreId(e.target.value)}
+                  className="w-full max-w-xs rounded-lg border border-border-color bg-white px-3 py-2.5 text-sm outline-none"
+                  data-testid="create-store"
+                >
+                  {DD_STORES.map((st) => (
+                    <option key={st.id} value={st.id}>
+                      {st.name} ({st.id})
+                    </option>
+                  ))}
+                </select>
+                <Help>Only stores with Direct Debit enabled are listed. One store per contract.</Help>
+              </div>
+
+              <div className="mb-4">
                 <Label hint="create.merchantReference" hintValue={JSON.stringify(merchantRef)}>Merchant reference number</Label>
                 <input
                   value={merchantRef}
                   onChange={(e) => setMerchantRef(e.target.value)}
                   className="w-full max-w-xs rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
                 />
-                <Help>Your own reference for this contract (order/invoice number, etc.)</Help>
+                <Help>3–26 characters: letters, digits, space and - / : . _ — unique, and never reusable (even after a discard).</Help>
               </div>
 
               <div className="mb-4">
@@ -484,7 +533,7 @@ export default function CreateDirectDebitContractModal({
                   value={contractDescription}
                   onChange={(e) => setContractDescription(e.target.value)}
                   placeholder="e.g. Monthly rent collection — Building 12, Unit 304"
-                  maxLength={140}
+                  maxLength={500}
                   className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
                 />
                 <Help>
@@ -721,6 +770,7 @@ export default function CreateDirectDebitContractModal({
                 <textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
+                  maxLength={1000}
                   className="min-h-[70px] w-full resize-y rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
                 />
                 <Help>Internal note for your team — not shown to the customer</Help>
@@ -982,9 +1032,8 @@ export default function CreateDirectDebitContractModal({
             <div>
               <h2 className="mb-1.5 text-xl font-bold text-text-primary">Review &amp; Send for Signature</h2>
               <p className="mb-5 text-[13px] text-text-muted">
-                {config.suppressCustomerNotifications
-                  ? "Geidea customer notifications are suppressed for this merchant — Geidea sends nothing; you share the review link (or the UAE PASS signing URL) with the customer from your own channels."
-                  : "Geidea sends the customer a review & signing link by SMS, email and WhatsApp. They verify with an OTP, review the contract and sign via UAE PASS."}
+                Geidea sends the customer a review &amp; signing link by SMS and email (the link is never shown to you).
+                They verify with an OTP, review the contract and sign via UAE PASS.
               </p>
 
               <div className="flex flex-col gap-3">
@@ -1092,6 +1141,16 @@ export default function CreateDirectDebitContractModal({
         </button>
         {step === 4 ? (
           <>
+          {!tbfc && (
+            <label className="flex items-center gap-2 rounded-lg border border-dashed border-fuchsia-400 px-3 py-1.5 text-[12px] text-fuchsia-700">
+              Prototype — DDS answer:
+              <select value={ddsOutcome} onChange={(e) => setDdsOutcome(e.target.value as typeof ddsOutcome)} className="rounded border border-fuchsia-300 bg-white px-1 py-0.5" data-testid="dds-outcome">
+                <option value="success">Accepted</option>
+                <option value="rejected">Refused</option>
+                <option value="unknown">No answer in time</option>
+              </select>
+            </label>
+          )}
           <button
             onClick={handleCreateAndSend}
             disabled={!acknowledged}

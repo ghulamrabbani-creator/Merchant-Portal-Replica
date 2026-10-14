@@ -210,7 +210,47 @@ function createLocalStorageStore<T extends object>(key: string, defaultValue: T)
   return { getSnapshot, getServerSnapshot, subscribe, set, reset };
 }
 
+// ---- User permissions by role (14-Oct-2026, MP Backlog v2 US-02 / Confluence S13) ----
+// Replaces the per-merchant action toggles that used to sit in PGW Config: who may do what is per
+// USER, in the Portal's role framework. The prototype simulates it with a role switcher in the top
+// bar. Proposed permission list — final list to be agreed with Badr.
+export type DDPermission =
+  | "view"
+  | "export"
+  | "create"
+  | "manageUnsigned" // resend signing link, discard, edit notes
+  | "pauseResume"
+  | "amend"
+  | "retry"
+  | "bulkMaker"
+  | "bulkChecker";
+
+export type DDRole = "admin" | "operator" | "viewer" | "maker" | "checker";
+
+export const DD_ROLES: { role: DDRole; label: string; perms: DDPermission[] }[] = [
+  { role: "admin", label: "Business admin (all permissions)", perms: ["view", "export", "create", "manageUnsigned", "pauseResume", "amend", "retry", "bulkMaker", "bulkChecker"] },
+  { role: "operator", label: "Operator", perms: ["view", "export", "create", "manageUnsigned", "pauseResume", "amend", "retry"] },
+  { role: "viewer", label: "Viewer (view only)", perms: ["view"] },
+  { role: "maker", label: "Bulk maker", perms: ["view", "bulkMaker"] },
+  { role: "checker", label: "Bulk checker", perms: ["view", "bulkChecker"] },
+];
+
+export const DD_PERMISSION_LABEL: Record<DDPermission, string> = {
+  view: "View Direct Debit",
+  export: "Export Contracts",
+  create: "Create Contract",
+  manageUnsigned: "Manage Unsigned Contract",
+  pauseResume: "Pause / Resume Subscription",
+  amend: "Amend Collection",
+  retry: "Retry Collection",
+  bulkMaker: "Bulk Upload Maker",
+  bulkChecker: "Bulk Upload Checker",
+};
+
+const STORAGE_KEY_ROLE = "mpr:dd-role:v1";
+
 const merchantStore = createLocalStorageStore(STORAGE_KEY, DEFAULT_MERCHANT_CONFIG);
+const roleStore = createLocalStorageStore<{ role: DDRole }>(STORAGE_KEY_ROLE, { role: "admin" });
 const beStore = createLocalStorageStore(STORAGE_KEY_BE, DEFAULT_BE_CONFIG);
 const devHintsStore = createLocalStorageStore(STORAGE_KEY_DEV_HINTS, { on: false });
 
@@ -225,17 +265,42 @@ interface DDConfigContextValue {
   beConfig: DDBackendConfig;
   setBeConfig: (patch: Partial<DDBackendConfig>) => void;
   resetBeConfig: () => void;
+  role: DDRole;
+  setRole: (r: DDRole) => void;
+  /** Does the current user's role carry this permission? Every action permission requires View. */
+  can: (p: DDPermission) => boolean;
 }
 
 const DDConfigContext = createContext<DDConfigContextValue | null>(null);
 
 export function DDConfigProvider({ children }: { children: ReactNode }) {
-  const config = useSyncExternalStore(
+  const rawConfig = useSyncExternalStore(
     merchantStore.subscribe,
     merchantStore.getSnapshot,
     merchantStore.getServerSnapshot,
   );
   const beConfig = useSyncExternalStore(beStore.subscribe, beStore.getSnapshot, beStore.getServerSnapshot);
+  const roleState = useSyncExternalStore(roleStore.subscribe, roleStore.getSnapshot, roleStore.getServerSnapshot);
+  const rolePerms = DD_ROLES.find((r) => r.role === roleState.role)?.perms ?? DD_ROLES[0].perms;
+  const can = (p: DDPermission) => rolePerms.includes("view") && rolePerms.includes(p);
+  // Back-compat: screens still read config.actions.* — it is now DERIVED from the user's role,
+  // not stored per merchant. Cancel is not in the MVP (US-21 placeholder) so it is always false.
+  const derivedConfig: DDMerchantConfig = {
+    ...rawConfig,
+    actions: {
+      allowCreateContract: can("create"),
+      allowResendSigningLink: can("manageUnsigned"),
+      allowDiscardContract: can("manageUnsigned"),
+      allowPauseResume: can("pauseResume"),
+      allowEditCollection: can("amend"),
+      allowRetryCollection: can("retry"),
+      allowCancelContract: false,
+      allowBulkUpload: can("bulkMaker"),
+    },
+    // MVP always uses Geidea's OIC; the notification-suppression switch is Phase 2 (hidden).
+    oicMode: "geidea",
+    suppressCustomerNotifications: false,
+  };
   const devHintsState = useSyncExternalStore(
     devHintsStore.subscribe,
     devHintsStore.getSnapshot,
@@ -275,7 +340,7 @@ export function DDConfigProvider({ children }: { children: ReactNode }) {
   return (
     <DDConfigContext.Provider
       value={{
-        config,
+        config: derivedConfig,
         setConfig,
         setMerchantOIC,
         setActions,
@@ -285,6 +350,9 @@ export function DDConfigProvider({ children }: { children: ReactNode }) {
         beConfig,
         setBeConfig,
         resetBeConfig,
+        role: roleState.role,
+        setRole: (r: DDRole) => roleStore.set({ role: r }),
+        can,
       }}
     >
       {children}

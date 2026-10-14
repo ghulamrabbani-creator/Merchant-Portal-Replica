@@ -15,7 +15,7 @@
 import { useState } from "react";
 import { Check, RotateCcw } from "lucide-react";
 import Modal from "@/components/ui/Modal";
-import { useDDConfig, DDActionToggles } from "@/lib/dd-config-context";
+import { useDDConfig } from "@/lib/dd-config-context";
 import FieldHint from "@/components/directdebit/FieldHint";
 import { HintKey } from "@/lib/dd-field-map";
 
@@ -83,31 +83,6 @@ function ToggleRow({ on, onClick, label }: { on: boolean; onClick: () => void; l
   );
 }
 
-function RadioOpt({
-  checked,
-  onClick,
-  label,
-}: {
-  checked: boolean;
-  onClick: () => void;
-  label: string;
-}) {
-  return (
-    <button onClick={onClick} className="flex items-center gap-2.5">
-      <span
-        className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] ${
-          checked ? "border-brand-blue" : "border-border-color"
-        }`}
-      >
-        {checked && <span className="h-[9px] w-[9px] rounded-full bg-brand-blue" />}
-      </span>
-      <span className={`text-[13.5px] ${checked ? "font-semibold text-text-primary" : "text-text-secondary"}`}>
-        {label}
-      </span>
-    </button>
-  );
-}
-
 const inputClass =
   "w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none focus:border-brand-blue";
 
@@ -171,19 +146,8 @@ function NumberSetting({
   );
 }
 
-const ACTION_ROWS: { key: keyof DDActionToggles; label: string; hint: HintKey; note?: string }[] = [
-  { key: "allowCreateContract", label: "Create contract", hint: "cfg.action.create", note: "Disables + Add Contract" },
-  { key: "allowResendSigningLink", label: "Resend signing link", hint: "cfg.action.resend", note: "Contract Detail" },
-  { key: "allowDiscardContract", label: "Discard unsigned contract", hint: "cfg.action.discard", note: "Not built yet" },
-  { key: "allowPauseResume", label: "Pause / resume", hint: "cfg.action.pauseResume", note: "Contract Detail" },
-  { key: "allowEditCollection", label: "Amend a collection", hint: "cfg.action.edit", note: "Contract Detail → Amend schedule" },
-  { key: "allowRetryCollection", label: "Retry a rejected collection", hint: "cfg.action.retry", note: "List + Detail" },
-  { key: "allowCancelContract", label: "Cancel contract", hint: "cfg.action.cancel", note: "Contract Detail" },
-  { key: "allowBulkUpload", label: "Bulk contract upload", hint: "cfg.action.bulk", note: "Needs Enable Bulk Contract Upload too" },
-];
-
 export default function PGWConfigModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { config, setConfig, setMerchantOIC, setActions, resetMerchantConfig } = useDDConfig();
+  const { config, setConfig, resetMerchantConfig } = useDDConfig();
   // Bumped on Reset so the NumberSetting drafts remount and re-seed from the defaults.
   const [resetKey, setResetKey] = useState(0);
 
@@ -230,70 +194,15 @@ export default function PGWConfigModal({ open, onClose }: { open: boolean; onClo
         <SectionTitle>Settlement authentication</SectionTitle>
         <FieldRow
           name="OIC"
-          desc="Which OIC — and whose DDS API credentials — this merchant's contracts settle and authenticate under."
+          desc="The OIC this merchant's contracts settle under."
           hint="cfg.oic"
-          hintValue={config.oicMode === "geidea" ? "oic_id = 569000143 (Geidea)" : `oic_id = ${config.merchantOIC.oic || "—"} (Merchant — not assignable in Phase 1)`}
+          hintValue="oic_id = 569000143 (Geidea)"
         >
-          <div className="flex flex-col gap-2.5">
-            <RadioOpt
-              checked={config.oicMode === "geidea"}
-              onClick={() => setConfig({ oicMode: "geidea" })}
-              label="Geidea OIC"
-            />
-            <RadioOpt
-              checked={config.oicMode === "merchant"}
-              onClick={() => setConfig({ oicMode: "merchant" })}
-              label="Merchant OIC"
-            />
+          <div className="rounded-lg bg-page-bg px-3.5 py-3 text-[12px] text-text-muted" data-testid="oic-readonly">
+            <b className="text-text-primary">Geidea OIC (569000143)</b> — the only option in the MVP. DDS API calls
+            authenticate with Geidea&apos;s own credentials, maintained in DD BE Config. Merchant OIC is Phase 2
+            (removed from this screen 14-Oct-2026).
           </div>
-
-          {config.oicMode === "geidea" ? (
-            <div className="mt-3 rounded-lg bg-page-bg px-3.5 py-3 text-[12px] text-text-muted">
-              Default. DDS API calls authenticate with Geidea&apos;s own OIC and credentials —
-              maintained in DD BE Config, not entered here.
-            </div>
-          ) : (
-            <div className="mt-3 flex flex-col gap-3 rounded-lg border border-dashed border-border-color bg-page-bg px-3.5 py-3.5">
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-                  OIC
-                </label>
-                <input
-                  value={config.merchantOIC.oic}
-                  onChange={(e) => setMerchantOIC({ oic: e.target.value })}
-                  placeholder="e.g. 5712 03392"
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-                  Username
-                </label>
-                <input
-                  value={config.merchantOIC.username}
-                  onChange={(e) => setMerchantOIC({ username: e.target.value })}
-                  placeholder="merchant.dds.user"
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  value={config.merchantOIC.password}
-                  onChange={(e) => setMerchantOIC({ password: e.target.value })}
-                  placeholder="••••••••••"
-                  className={inputClass}
-                />
-              </div>
-              <div className="text-[11px] text-text-muted">
-                Used as the authentication credentials in DDS API calls for this merchant&apos;s
-                contracts.
-              </div>
-            </div>
-          )}
         </FieldRow>
 
         <div className="mt-6" />
@@ -321,23 +230,6 @@ export default function PGWConfigModal({ open, onClose }: { open: boolean; onClo
 
         <div className="mt-6" />
         <SectionTitle>Customer journey</SectionTitle>
-        <FieldRow
-          name="Suppress Geidea customer notifications"
-          desc="Off by default. On: Geidea sends no SMS, email or WhatsApp to this merchant's customers (signing link, resend, OTP) — for partners that run their own frontend and messaging."
-          hint="cfg.suppress"
-          hintValue={`suppress_customer_notifications = ${config.suppressCustomerNotifications}`}
-        >
-          <ToggleRow
-            on={config.suppressCustomerNotifications}
-            onClick={() => setConfig({ suppressCustomerNotifications: !config.suppressCustomerNotifications })}
-          />
-          {config.suppressCustomerNotifications && (
-            <div className="mt-3 rounded-lg border border-status-pending/50 bg-status-pending/10 px-3.5 py-3 text-[12px] text-text-secondary">
-              New contracts show no SMS/email preview (nothing is sent by Geidea), Resend signing link
-              is unavailable, and Create Contract returns the UAE PASS signingUrl to the partner instead.
-            </div>
-          )}
-        </FieldRow>
         <FieldRow
           name="Contract review expiry"
           desc="How long the customer's review & signing link stays valid after the contract is created."
@@ -408,31 +300,12 @@ export default function PGWConfigModal({ open, onClose }: { open: boolean; onClo
         </FieldRow>
 
         <div className="mt-6" />
-        <SectionTitle>Merchant actions</SectionTitle>
-        <p className="mb-2 text-[12px] text-text-muted">
-          Each Direct Debit action can be switched off for this merchant. All on by default. When off,
-          the portal disables the button and the Backend returns 403 ACTION_NOT_ALLOWED.
+        <SectionTitle>Who can do what</SectionTitle>
+        <p className="mb-2 rounded-lg bg-page-bg px-3.5 py-3 text-[12px] text-text-muted">
+          The per-merchant action switches were removed on 14-Oct-2026 (MP Backlog v2, US-02). Who may create,
+          resend, discard, pause, amend, retry or bulk-upload is now a <b>per-user permission</b> in the Portal&apos;s
+          role framework. In this prototype, use the <b>Role (prototype)</b> switcher in the top bar to try each role.
         </p>
-        <div className="rounded-lg border border-border-color">
-          {ACTION_ROWS.map((row) => (
-            <div
-              key={row.key}
-              className="flex items-center justify-between gap-4 border-b border-border-color px-4 py-3 last:border-b-0"
-            >
-              <div>
-                <div className="flex items-center gap-1.5 text-[13px] font-semibold text-text-primary">
-                  {row.label}
-                  <FieldHint k={row.hint} value={String(config.actions[row.key])} />
-                </div>
-                {row.note && <div className="text-[11.5px] text-text-muted">{row.note}</div>}
-              </div>
-              <ToggleRow
-                on={config.actions[row.key]}
-                onClick={() => setActions({ [row.key]: !config.actions[row.key] })}
-              />
-            </div>
-          ))}
-        </div>
 
         <div className="mt-8 flex justify-end">
           <button

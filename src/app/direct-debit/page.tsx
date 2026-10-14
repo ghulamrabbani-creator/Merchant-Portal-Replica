@@ -1,8 +1,8 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, Plus, UploadCloud, Landmark, CreditCard, HelpCircle, MoreVertical } from "lucide-react";
+import { ChevronDown, Plus, UploadCloud, Landmark, CreditCard, HelpCircle, MoreVertical, Store } from "lucide-react";
 import clsx from "clsx";
 import PageHeader from "@/components/ui/PageHeader";
 import SearchBar from "@/components/ui/SearchBar";
@@ -10,7 +10,7 @@ import ExportButton from "@/components/ui/ExportButton";
 import StatCard from "@/components/ui/StatCard";
 import StatusDot from "@/components/ui/StatusDot";
 import Modal from "@/components/ui/Modal";
-import DirectDebitFiltersButton from "@/components/directdebit/DirectDebitFiltersButton";
+import DirectDebitFiltersButton, { DDListFilters, EMPTY_FILTERS } from "@/components/directdebit/DirectDebitFiltersButton";
 import CreateDirectDebitContractModal from "@/components/directdebit/CreateDirectDebitContractModal";
 import CollectionTable from "@/components/directdebit/CollectionTable";
 import FieldHint from "@/components/directdebit/FieldHint";
@@ -18,18 +18,52 @@ import { useDDConfig } from "@/lib/dd-config-context";
 import { useAllContracts, useHydrated } from "@/lib/dd-contract-store";
 import { HintKey } from "@/lib/dd-field-map";
 import { applyRetryResult, applyRetrySubmitted, contractStatusLabel, formatMoneyAED } from "@/lib/direct-debit";
+import { DD_STORES } from "@/lib/mock-data";
+import { discardBlockedReason, discardContract, resendBlockedReason, resendSigningLink, useContractsVersion } from "@/lib/dd-actions";
 import { DirectDebitContract, DirectDebitOccurrence } from "@/lib/types";
 
 function collectionSummary(occurrences: DirectDebitOccurrence[]) {
   const successful = occurrences.filter((o) => o.status === "Paid");
-  // Rejected (still retryable) and Failed (final) both count as unsuccessful collections here.
-  const failed = occurrences.filter((o) => o.status === "Failed" || o.status === "Rejected");
+  // US-04 (14-Oct-2026): only Failed (final) collections count here. Rejected/Error can still be
+  // retried and are shown on the collection rows, not as failed.
+  const failed = occurrences.filter((o) => o.status === "Failed");
   return {
     successCount: successful.length,
     successAmount: successful.reduce((sum, o) => sum + o.amount, 0),
     failCount: failed.length,
     failAmount: failed.reduce((sum, o) => sum + o.amount, 0),
   };
+}
+
+const sumAmt = (xs: { amount: number }[]) => xs.reduce((t, o) => t + o.amount, 0);
+
+/** US-03 (14-Oct-2026): every card is computed from all contracts in the selected stores. Total Collections = Paid only (TB-1); Failed = Failed only; Declined =
+ *  DD Rejected + DD Denied + DD Error. */
+function computeKpis(list: DirectDebitContract[]) {
+  const active = list.filter((c) => c.status === "Active");
+  const pendingSign = list.filter((c) => c.status === "Awaiting Customer Details" || c.status === "Pending Customer Sign");
+  const pendingBank = list.filter((c) => c.status === "Pending System Submission" || c.status === "Pending Bank Approval");
+  const paid = list.flatMap((c) => c.occurrences.filter((o) => o.status === "Paid"));
+  const failedByContract = list.map((c) => c.occurrences.filter((o) => o.status === "Failed")).filter((x) => x.length > 0);
+  const failed = failedByContract.flat();
+  const declined = list.filter((c) => c.status === "Rejected" || c.status === "Denied" || c.status === "Error");
+  return {
+    active: { n: active.length, value: sumAmt(active.map((c) => ({ amount: c.maxAmount }))) },
+    pendingSign: { n: pendingSign.length, awaiting: pendingSign.filter((c) => c.status === "Awaiting Customer Details").length },
+    pendingBank: { n: pendingBank.length },
+    paid: { n: paid.length, amount: sumAmt(paid) },
+    failed: { n: failed.length, amount: sumAmt(failed), contracts: failedByContract.length },
+    declined: { n: declined.length },
+  };
+}
+
+function matchesSearch(c: DirectDebitContract, scope: string, text: string): boolean {
+  const q = text.trim().toLowerCase();
+  if (!q) return true;
+  if (scope === "Customer Name") return c.customerName.toLowerCase().includes(q);
+  if (scope === "Emirates ID") return c.customerIdNumber.replace(/-/g, "").includes(q.replace(/-/g, ""));
+  if (scope === "Mobile") return (c.customerMobile ?? "").includes(q);
+  return c.merchantRef.toLowerCase().includes(q);
 }
 
 function Th({ children, k, className }: { children?: React.ReactNode; k?: HintKey; className?: string }) {
@@ -54,6 +88,34 @@ export default function DirectDebitPage() {
   // statically prerendered at build time — so rows render only once hydrated, to keep build-time
   // dates out of the HTML.
   const hydrated = useHydrated();
+  const { can } = useDDConfig();
+  useContractsVersion(); // re-render after Discard / Resend
+  const [search, setSearch] = useState<{ scope: string; text: string }>({ scope: "Merchant Ref", text: "" });
+  const [filters, setFilters] = useState<DDListFilters>(EMPTY_FILTERS);
+  const [stores, setStores] = useState<string[]>(DD_STORES.map((s) => s.id));
+  const [storeOpen, setStoreOpen] = useState(false);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [discardFor, setDiscardFor] = useState<DirectDebitContract | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const inView = useMemo(
+    () =>
+      contracts.filter(
+        (c) =>
+          (!c.storeId || stores.includes(c.storeId)) &&
+          (filters.statuses.length === 0 || filters.statuses.includes(c.status)) &&
+          (filters.frequencies.length === 0 || filters.frequencies.includes(c.frequency)) &&
+          (filters.instruments.length === 0 || (c.instrumentType && filters.instruments.includes(c.instrumentType)))
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [contracts, contracts.length, stores, filters, hydrated]
+  );
+  const searching = search.text.trim().length > 0;
+  const rows = inView.filter((c) => matchesSearch(c, search.scope, search.text));
+  // v2.6 / Backlog v2.1 decision 9: the cards always cover every contract in the selected stores —
+  // not the filters, search or any date range.
+  const kpi = computeKpis(contracts.filter((c) => !c.storeId || stores.includes(c.storeId)));
+  const multiStore = stores.length > 1;
 
   // Local, in-memory copy of each contract's occurrences, keyed by contract id, so Retry on the
   // List screen's expand-row can update the view without mutating the shared mock-data module —
@@ -78,38 +140,63 @@ export default function DirectDebitPage() {
 
   return (
     <div>
-      <PageHeader title="Direct Debit Contracts" />
+      <PageHeader
+        title="Direct Debit Contracts"
+        storeSelector={
+          <div className="relative">
+            <button
+              onClick={() => setStoreOpen((o) => !o)}
+              className="flex items-center gap-2 rounded-lg border border-border-color bg-brand-orange-light px-4 py-2 text-sm font-medium text-text-primary"
+              data-testid="store-selector"
+            >
+              <Store size={15} />
+              {stores.length === DD_STORES.length ? "All stores" : `${stores.length} store${stores.length === 1 ? "" : "s"}`}
+              <ChevronDown size={14} />
+            </button>
+            {storeOpen && (
+              <div className="absolute right-0 z-20 mt-1 w-72 rounded-xl border border-border-color bg-white p-2 shadow-lg">
+                {DD_STORES.map((st) => (
+                  <label key={st.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-page-bg">
+                    <input
+                      type="checkbox"
+                      checked={stores.includes(st.id)}
+                      onChange={() =>
+                        setStores((cur) => (cur.includes(st.id) ? (cur.length > 1 ? cur.filter((x) => x !== st.id) : cur) : [...cur, st.id]))
+                      }
+                    />
+                    <span className="text-text-primary">{st.name}</span>
+                    <span className="ml-auto text-xs text-text-muted">{st.id}</span>
+                  </label>
+                ))}
+                <div className="px-2 pt-1 text-xs text-text-muted">Only DD-enabled stores are listed. At least one must stay selected.</div>
+              </div>
+            )}
+          </div>
+        }
+      />
 
       <div className="mb-5 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 rounded-lg border border-border-color bg-white px-4 py-2.5 text-sm font-medium text-text-primary">
-            All statuses
-            <ChevronDown size={14} />
-          </button>
           <SearchBar
-            scopes={["Contract Ref", "Customer Name", "Merchant Ref", "Emirates ID"]}
-            placeholder="Search collections, mandates"
+            scopes={["Merchant Ref", "Customer Name", "Emirates ID", "Mobile"]}
+            placeholder="Search contracts"
+            onChange={(scope, text) => setSearch({ scope, text })}
           />
         </div>
         <div className="flex items-center gap-3">
-          <DirectDebitFiltersButton />
-          <ExportButton />
+          <DirectDebitFiltersButton value={filters} onApply={setFilters} />
+          {can("export") && <ExportButton />}
           <button
-            onClick={() => config.actions.allowCreateContract && setCreateOpen(true)}
-            disabled={!config.actions.allowCreateContract}
-            title={
-              config.actions.allowCreateContract
-                ? undefined
-                : "Contract creation is switched off for this merchant (allow_create_contract = false)."
-            }
+            onClick={() => can("create") && setCreateOpen(true)}
+            disabled={!can("create")}
+            title={can("create") ? undefined : "Your role doesn't include the Create Contract permission."}
             className="flex items-center gap-2 rounded-lg bg-brand-blue px-[18px] py-2.5 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
             data-testid="add-contract"
           >
             <Plus size={16} />
             Add Contract
           </button>
-          <FieldHint k="cfg.action.create" value={String(config.actions.allowCreateContract)} />
-          {config.enableBulkUpload && config.actions.allowBulkUpload && (
+          {config.enableBulkUpload && (can("bulkMaker") || can("bulkChecker")) && (
             <button
               onClick={() => setBulkUploadOpen(true)}
               className="flex items-center gap-2 rounded-lg border border-brand-blue px-[18px] py-2.5 text-sm font-semibold text-brand-blue hover:bg-brand-blue/5"
@@ -121,14 +208,24 @@ export default function DirectDebitPage() {
         </div>
       </div>
 
-      <div className="mb-5 flex gap-3">
-        <StatCard label="Active Contracts" value="142" sub="Total value: AED 1,842,600.00" />
-        <StatCard label="Pending Customer Sign" value="11" sub="Awaiting UAE PASS signature" />
-        <StatCard label="Pending Bank Approval" value="7" sub="Submitted to Central Bank" />
-        <StatCard label="Total Collections" value="3,204" sub="AED 12,860,400.00 total value" />
-        <StatCard label="Failed Collections" value="AED 86,400.00" sub="27 occurrences, 9 exhausted retries" />
-        <StatCard label="Declined Contracts" value="6" sub="Rejected or Denied" />
-      </div>
+      {toast && (
+        <div className="mb-4 flex items-start justify-between gap-4 rounded-lg border border-status-approved/40 bg-status-approved/5 px-4 py-3 text-sm text-text-primary">
+          <span>{toast}</span>
+          <button onClick={() => setToast(null)} className="text-text-muted">Dismiss</button>
+        </div>
+      )}
+
+      {/* US-03: hidden while a search is active; computed from the stores and filters in view. */}
+      {hydrated && !searching && (
+        <div className="mb-5 flex gap-3" data-testid="dd-kpis">
+          <StatCard label="DD Active" value={String(kpi.active.n)} sub={`Max contract value: ${formatMoneyAED(kpi.active.value)}`} />
+          <StatCard label="Pending Customer Sign" value={String(kpi.pendingSign.n)} sub={`${kpi.pendingSign.awaiting} awaiting customer details`} />
+          <StatCard label="Pending Bank Approval" value={String(kpi.pendingBank.n)} sub="Submitted or approved by the paying bank" />
+          <StatCard label="Total Collections" value={String(kpi.paid.n)} sub={`${formatMoneyAED(kpi.paid.amount)} collected (Paid only)`} />
+          <StatCard label="Failed Collections" value={formatMoneyAED(kpi.failed.amount)} sub={`${kpi.failed.n} collections · ${kpi.failed.contracts} contracts`} />
+          <StatCard label="Declined Contracts" value={String(kpi.declined.n)} sub="DD Rejected, DD Denied or DD Error" />
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-xl border border-border-color bg-card-bg">
         <table className="w-full min-w-[1200px] text-sm">
@@ -137,6 +234,7 @@ export default function DirectDebitPage() {
               <th className="w-10 px-4 py-3" />
               <Th k="view.merchantRef">Merchant Reference</Th>
               <Th k="view.customerName">Customer Name</Th>
+              {multiStore && <Th>Store</Th>}
               <Th k="view.instrument" className="px-3">Instrument</Th>
               <Th k="view.validity">Validity</Th>
               <Th k="view.frequency">Frequency</Th>
@@ -151,12 +249,19 @@ export default function DirectDebitPage() {
           <tbody>
             {!hydrated && (
               <tr>
-                <td colSpan={12} className="px-4 py-6 text-center text-sm text-text-muted">
+                <td colSpan={multiStore ? 13 : 12} className="px-4 py-6 text-center text-sm text-text-muted">
                   Loading contracts…
                 </td>
               </tr>
             )}
-            {hydrated && contracts.map((c) => {
+            {hydrated && rows.length === 0 && (
+              <tr>
+                <td colSpan={multiStore ? 13 : 12} className="px-4 py-6 text-center text-sm text-text-muted">
+                  No contracts match{searching ? " this search" : " the selected stores and filters"}.
+                </td>
+              </tr>
+            )}
+            {hydrated && rows.map((c) => {
               const isOpen = expanded === c.id;
               const occurrences = occurrencesOf(c);
               const summary = collectionSummary(occurrences);
@@ -188,6 +293,7 @@ export default function DirectDebitPage() {
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-text-primary">{c.customerName}</td>
+                    {multiStore && <td className="px-4 py-3 text-xs text-text-secondary">{c.storeName ?? "—"}</td>}
                     <td className="px-3 py-3 text-text-secondary">
                       {c.instrumentType === "Bank Account" ? (
                         <Landmark size={17} strokeWidth={1.7} />
@@ -261,13 +367,47 @@ export default function DirectDebitPage() {
                         <div className="mt-0.5 text-xs text-text-muted">{c.statusNote}</div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-text-muted">
-                      <MoreVertical size={16} />
+                    <td className="relative px-4 py-3 text-text-muted">
+                      <button onClick={() => setMenuFor(menuFor === c.id ? null : c.id)} data-testid={`row-menu-${c.id}`} aria-label="Contract actions">
+                        <MoreVertical size={16} />
+                      </button>
+                      {menuFor === c.id && (() => {
+                        const resendWhy = resendBlockedReason(c, can("manageUnsigned"));
+                        const discardWhy = discardBlockedReason(c, can("manageUnsigned"));
+                        const item = "block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-page-bg disabled:cursor-not-allowed disabled:text-text-muted disabled:hover:bg-transparent";
+                        return (
+                          <div className="absolute right-4 z-20 mt-1 w-56 rounded-xl border border-border-color bg-white p-1 shadow-lg">
+                            <Link href={`/direct-debit/${c.id}`} className={clsx(item, "text-text-primary")}>View details</Link>
+                            <button
+                              className={clsx(item, "text-text-primary")}
+                              disabled={!!resendWhy}
+                              title={resendWhy ?? undefined}
+                              onClick={() => {
+                                setMenuFor(null);
+                                setToast(resendSigningLink(c.id, config.contractReviewExpiryDays));
+                              }}
+                            >
+                              Resend signing link
+                            </button>
+                            <button
+                              className={clsx(item, "text-status-declined")}
+                              disabled={!!discardWhy}
+                              title={discardWhy ?? undefined}
+                              onClick={() => {
+                                setMenuFor(null);
+                                setDiscardFor(c);
+                              }}
+                            >
+                              Discard contract
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
                   {isOpen && (
                     <tr className="border-b border-border-color bg-page-bg/40">
-                      <td colSpan={12} className="px-4 py-4 pl-14">
+                      <td colSpan={multiStore ? 13 : 12} className="px-4 py-4 pl-14">
                         {occurrences.length > 0 ? (
                           <>
                             <CollectionTable
@@ -294,13 +434,40 @@ export default function DirectDebitPage() {
           </tbody>
         </table>
         <div className="border-t border-border-color px-4 py-3 text-sm text-text-secondary">
-          Show {contracts.length} of 142 contracts
+          Showing {rows.length} of {inView.length} contracts{multiStore ? ` across ${stores.length} stores` : ""}
         </div>
       </div>
 
       {/* Mounted only while open (25-Sep-2026) so its date defaults and the lead-time rule are
           seeded from the hydrated, persisted DD config — same fix as the config modals. */}
       {createOpen && <CreateDirectDebitContractModal open={createOpen} onClose={() => setCreateOpen(false)} />}
+
+      <Modal open={!!discardFor} onClose={() => setDiscardFor(null)}>
+        {discardFor && (
+          <div className="p-8">
+            <h2 className="mb-2 text-xl font-bold text-text-primary">Discard contract {discardFor.merchantRef}?</h2>
+            <p className="mb-6 text-sm text-text-secondary">
+              The customer hasn&apos;t signed yet. Discarding stops the contract for good: the review link will show
+              &ldquo;no longer available&rdquo;, no collection will be made, and the merchant reference can&apos;t be reused.
+              {(discardFor.status === "Pending Customer Sign" || discardFor.status === "Request Expired") &&
+                " Geidea will also discard the mandate at DDS."}
+            </p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setDiscardFor(null)} className="rounded-lg border border-border-color px-5 py-2.5 text-sm font-medium">Keep contract</button>
+              <button
+                onClick={() => {
+                  setToast(discardContract(discardFor.id));
+                  setDiscardFor(null);
+                }}
+                className="rounded-lg bg-status-declined px-5 py-2.5 text-sm font-semibold text-white"
+                data-testid="discard-confirm"
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal open={bulkUploadOpen} onClose={() => setBulkUploadOpen(false)}>
         <div className="p-8">
@@ -309,7 +476,7 @@ export default function DirectDebitPage() {
             Bulk Contract Creation is still being designed — this button is wired up per the
             Enable Bulk Contract Upload toggle in PGW Config in MA, but the upload flow itself
             (file format, maker/checker review, TBFC interaction) isn&apos;t built yet. Placeholder
-            for that flow, same pattern as Cancel mandate on Contract Detail.
+            for that flow (US-37, TBFC bulk, is Phase 1 in backlog v2).
           </p>
           <div className="flex justify-end">
             <button

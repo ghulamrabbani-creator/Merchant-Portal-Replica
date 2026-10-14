@@ -7,7 +7,10 @@ import {
   ArrowLeft,
   PauseCircle,
   PlayCircle,
-  Ban,
+  Trash2,
+  Pencil,
+  Download,
+  History,
   Landmark,
   CreditCard,
   RotateCw,
@@ -22,17 +25,26 @@ import clsx from "clsx";
 import {
   formatMoneyAED,
   rolloverStreakUsed,
-  PENDING_INSTRUMENT_REF_LABEL,
   applyRetryResult,
   applyRetrySubmitted,
   contractStatusLabel,
-  formatCreatedOn,
   isAmendable,
-  maskEmail,
-  maskMobile,
+  isUnsigned,
+  outstandingAmount,
+  centralBankRef,
+  formatInstrumentRef,
 } from "@/lib/direct-debit";
-import { useContract, persistIfCreated } from "@/lib/dd-contract-store";
-import { directDebitContracts } from "@/lib/mock-data";
+import { useContract } from "@/lib/dd-contract-store";
+import {
+  MAX_RESENDS,
+  discardBlockedReason,
+  discardContract,
+  editNotes,
+  logActivity,
+  resendBlockedReason as resendWhy,
+  resendSigningLink,
+  useContractsVersion,
+} from "@/lib/dd-actions";
 import { useDDConfig } from "@/lib/dd-config-context";
 import { HintKey } from "@/lib/dd-field-map";
 import StatCard from "@/components/ui/StatCard";
@@ -43,8 +55,11 @@ import AmendScheduleModal from "@/components/directdebit/AmendScheduleModal";
 import FieldHint from "@/components/directdebit/FieldHint";
 import { DDSubscriptionStatus, DirectDebitContract, DirectDebitOccurrence } from "@/lib/types";
 
-// Max resends per contract (S3 §1.5 — configurable in the Backend).
-const MAX_RESENDS = 5;
+// 14-Oct-2026 (MP Backlog v2): Cancel mandate removed (cancellation is a placeholder, US-21);
+// Discard (US-34), Edit notes (US-35), Resend with expiry extension (US-15), document download
+// (US-17/US-33) and activity history (US-32) added; every action is gated by status AND the role's
+// permissions (US-02 — role switcher in the top bar). Failed = Failed only; Outstanding excludes
+// rolled-over amounts.
 
 function Field({ label, value, hint }: { label: React.ReactNode; value: React.ReactNode; hint?: HintKey }) {
   return (
@@ -88,8 +103,8 @@ export default function ContractDetailPage({ params }: { params: Promise<{ id: s
 }
 
 function ContractDetail({ c }: { c: DirectDebitContract }) {
-  const { config } = useDDConfig();
-  const actions = config.actions;
+  const { config, can } = useDDConfig();
+  useContractsVersion(); // re-render after Discard / Resend / Edit notes
 
   // Local, in-memory copy so Pause/Resume/Retry/Amend can update the view without mutating the
   // shared mock-data module. Not persisted for demo records.
@@ -97,19 +112,22 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
   const [occurrences, setOccurrences] = useState<DirectDebitOccurrence[]>(c.occurrences);
   const [scheduleVersion, setScheduleVersion] = useState(c.scheduleVersion ?? 1);
   const [pauseModalOpen, setPauseModalOpen] = useState(false);
-  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [pauseReason, setPauseReason] = useState("");
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesDraft, setNotesDraft] = useState(c.notes ?? "");
   const [amendOpen, setAmendOpen] = useState(false);
   const [amendNotice, setAmendNotice] = useState<string | null>(null);
-  const [resendCount, setResendCount] = useState(c.signingNotificationCount ?? 0);
   const [resendNotice, setResendNotice] = useState<string | null>(null);
+  const resendCount = c.signingNotificationCount ?? 0;
 
   const summary = useMemo(() => {
     const paid = occurrences.filter((o) => o.status === "Paid");
-    const failed = occurrences.filter((o) => o.status === "Failed" || o.status === "Rejected");
+    const failed = occurrences.filter((o) => o.status === "Failed");
     const scheduled = occurrences.filter((o) => o.status === "Scheduled");
     const collected = paid.reduce((sum, o) => sum + o.amount, 0);
-    const outstanding =
-      scheduled.reduce((sum, o) => sum + o.amount, 0) + failed.reduce((sum, o) => sum + o.amount, 0);
+    const outstanding = outstandingAmount(occurrences);
+    // TB-16 / US-17: before activation the first collection is shown as planned.
     const next = scheduled[0];
     const last = [...paid, ...failed].sort((a, b) => a.seq - b.seq).pop();
     return { paid, failed, scheduled, collected, outstanding, next, last };
@@ -117,34 +135,18 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
 
   const liveRolloverRemaining = Math.max(0, c.rolloversAllowed - rolloverStreakUsed(occurrences));
 
-  const isPendingSign = c.status === "Pending Customer Sign" || c.status === "Awaiting Customer Details";
-  const isClosed = c.status === "Cancelled" || c.status === "Rejected";
+  const isPendingSign = isUnsigned(c.status);
+  const signedDoc = !isPendingSign && !["Awaiting Customer Details", "Not Submitted", "Link Expired", "Discarded"].includes(c.status);
   const canAmendAny = occurrences.some((o) => isAmendable(o));
   const mobile = c.customerMobile ?? "0501234567";
   const email = c.customerEmail ?? "customer@example.com";
 
   function handleResend() {
-    if (!actions.allowResendSigningLink || config.suppressCustomerNotifications || resendCount - 1 >= MAX_RESENDS) return;
-    const n = resendCount + 1;
-    setResendCount(n);
-    // Write through to the shared record (and this browser's store, for created contracts).
-    const target = directDebitContracts.find((x) => x.id === c.id);
-    if (target) {
-      target.signingNotificationCount = n;
-      target.signingNotificationSentAt = formatCreatedOn(new Date());
-      persistIfCreated(target);
-    }
-    setResendNotice(
-      `Signing link resent by SMS (${maskMobile(mobile)}), email (${maskEmail(email)}) and WhatsApp — resend ${n - 1} of ${MAX_RESENDS}. Link expiry unchanged${c.reviewLinkExpiresAt ? ` (${c.reviewLinkExpiresAt})` : ""} — expiry extension isn't in this prototype yet.`
-    );
+    if (resendBlockedReason) return;
+    setResendNotice(resendSigningLink(c.id, config.contractReviewExpiryDays));
   }
-  const resendBlockedReason = !actions.allowResendSigningLink
-    ? "Resending is switched off for this merchant (allow_resend_signing_link = false)."
-    : config.suppressCustomerNotifications
-      ? "NOTIFICATIONS_SUPPRESSED — Geidea customer notifications are suppressed for this merchant; the partner re-sends from its own channels."
-      : resendCount - 1 >= MAX_RESENDS
-        ? `Maximum ${MAX_RESENDS} resends reached.`
-        : null;
+  const resendBlockedReason = resendWhy(c, can("manageUnsigned"));
+  const discardWhy = discardBlockedReason(c, can("manageUnsigned"));
 
   return (
     <div>
@@ -153,7 +155,7 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
           Direct Debit
         </Link>
         <span>/</span>
-        <span>{c.ref || c.merchantRef}</span>
+        <span>{c.merchantRef}</span>
       </div>
 
       <div className="mb-5 flex items-start justify-between gap-4">
@@ -163,7 +165,7 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
           </Link>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-bold text-text-primary">{c.ref || c.merchantRef}</h1>
+              <h1 className="text-2xl font-bold text-text-primary">{c.merchantRef}</h1>
               <StatusDot status={contractStatusLabel(c)} />
               <FieldHint k="view.status" value={contractStatusLabel(c)} />
               {subscriptionStatus === "Paused" && (
@@ -203,6 +205,16 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
               </span>
             </>
           )}
+          {!discardWhy && (
+            <button
+              onClick={() => setDiscardOpen(true)}
+              className="flex items-center gap-2 rounded-lg border border-status-declined px-4 py-2.5 text-sm font-medium text-status-declined"
+              data-testid="discard-open"
+            >
+              <Trash2 size={15} />
+              Discard
+            </button>
+          )}
           {c.status === "Active" && (
             <span className="inline-flex items-center gap-1">
               <button
@@ -210,10 +222,10 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
                   setAmendNotice(null);
                   setAmendOpen(true);
                 }}
-                disabled={!actions.allowEditCollection || !canAmendAny}
+                disabled={!can("amend") || !canAmendAny}
                 title={
-                  !actions.allowEditCollection
-                    ? "Amending is switched off for this merchant (allow_edit_collection = false)."
+                  !can("amend")
+                    ? "Your role doesn't include the Amend Collection permission."
                     : !canAmendAny
                       ? "No upcoming Scheduled collection that can still be changed."
                       : "Change the date or amount of upcoming collections"
@@ -232,8 +244,8 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
               {subscriptionStatus === "Active" ? (
                 <button
                   onClick={() => setPauseModalOpen(true)}
-                  disabled={!actions.allowPauseResume}
-                  title={actions.allowPauseResume ? undefined : "Pause/resume is switched off for this merchant (allow_pause_resume = false)."}
+                  disabled={!can("pauseResume")}
+                  title={can("pauseResume") ? undefined : "Your role doesn't include the Pause / Resume permission."}
                   className="flex items-center gap-2 rounded-lg border border-border-color bg-white px-4 py-2.5 text-sm font-medium text-text-primary hover:border-text-muted disabled:cursor-not-allowed disabled:text-text-muted"
                 >
                   <PauseCircle size={16} />
@@ -241,8 +253,12 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
                 </button>
               ) : (
                 <button
-                  onClick={() => setSubscriptionStatus("Active")}
-                  disabled={!actions.allowPauseResume}
+                  onClick={() => {
+                    setSubscriptionStatus("Active");
+                    logActivity(c.id, "Merchant user", "Collections resumed");
+                  }}
+                  disabled={!can("pauseResume")}
+                  title={can("pauseResume") ? undefined : "Your role doesn't include the Pause / Resume permission."}
                   className="flex items-center gap-2 rounded-lg border border-brand-blue px-4 py-2.5 text-sm font-medium text-brand-blue disabled:cursor-not-allowed disabled:border-border-color disabled:text-text-muted"
                 >
                   <PlayCircle size={16} />
@@ -252,20 +268,20 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
               <FieldHint k={subscriptionStatus === "Active" ? "act.pause" : "act.resume"} />
             </span>
           )}
-          {!isClosed && c.status !== "Awaiting Customer Details" && (
-            <span className="inline-flex items-center gap-1">
-              <button
-                onClick={() => setCancelModalOpen(true)}
-                disabled={!actions.allowCancelContract}
-                title={actions.allowCancelContract ? undefined : "Cancel is switched off for this merchant (allow_cancel_contract = false)."}
-                className="flex items-center gap-2 rounded-lg border border-status-declined px-4 py-2.5 text-sm font-medium text-status-declined disabled:cursor-not-allowed disabled:border-border-color disabled:text-text-muted"
-              >
-                <Ban size={16} />
-                Cancel mandate
-              </button>
-              <FieldHint k="act.cancel" />
-            </span>
-          )}
+          <a
+            href={`data:text/plain;charset=utf-8,${encodeURIComponent(`${signedDoc ? "SIGNED" : "UNSIGNED"} CONTRACT (prototype)
+Merchant reference: ${c.merchantRef}
+Customer: ${c.customerName}`)}`}
+            download={`${c.merchantRef}-${signedDoc ? "signed" : "unsigned"}.txt`}
+            className={clsx(
+              "flex items-center gap-2 rounded-lg border border-border-color bg-white px-4 py-2.5 text-sm font-medium text-text-primary hover:border-text-muted",
+              (c.status === "Awaiting Customer Details" || c.status === "Not Submitted" || c.status === "Discarded" || c.status === "Link Expired") && "hidden"
+            )}
+            data-testid="download-contract"
+          >
+            <Download size={15} />
+            {signedDoc ? "Signed contract" : "Unsigned contract"}
+          </a>
         </div>
       </div>
 
@@ -293,6 +309,20 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
         </div>
       )}
 
+      {c.status === "Not Submitted" && (
+        <div className="mb-5 rounded-lg border border-status-declined/60 bg-status-declined/5 px-4 py-2.5 text-sm text-text-primary" data-testid="not-submitted-banner">
+          <b>Not submitted to DDS.</b>{" "}
+          {c.notSubmittedKind === "unknown"
+            ? `DDS didn't answer in time, so the outcome is unknown. Contact Geidea support quoting ${c.merchantRef} — the Backend checks with DDS before any resubmission.`
+            : `DDS refused the contract${c.notSubmittedReason ? `: ${c.notSubmittedReason.replace(/\.$/, "")}` : ""}. Correct the details and resubmit with the same merchant reference, or discard it.`}
+        </div>
+      )}
+      {c.mandateReason && (c.status === "Rejected" || c.status === "Denied" || c.status === "Error" || c.status === "Request Expired") && (
+        <div className="mb-5 rounded-lg border border-status-declined/60 bg-status-declined/5 px-4 py-2.5 text-sm text-text-primary">
+          <b>{contractStatusLabel(c)}:</b> {c.mandateReason}
+        </div>
+      )}
+
       {c.awaitingInstrumentNote && c.status === "Awaiting Customer Details" && (
         <div className="mb-5 rounded-lg border border-status-pending bg-status-pending/10 px-4 py-2.5 text-sm text-text-primary">
           {c.awaitingInstrumentNote}
@@ -313,19 +343,19 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
           sub={`${summary.paid.length} of ${occurrences.length} installments`}
         />
         <StatCard
-          label="Unsuccessful Collections"
+          label="Failed Collections"
           value={formatMoneyAED(summary.failed.reduce((sum, o) => sum + o.amount, 0))}
-          sub={`${summary.failed.length} of ${occurrences.length} installments`}
+          sub={`${summary.failed.length} of ${occurrences.length} installments (final)`}
         />
         <StatCard
           label="Outstanding"
           value={formatMoneyAED(summary.outstanding)}
-          sub={summary.failed.length > 0 ? `incl. ${summary.failed.length} unsuccessful` : "—"}
+          sub={c.status === "Active" ? (summary.failed.length > 0 ? `incl. ${summary.failed.length} failed` : "Scheduled + failed, excl. rolled over") : "Planned — collections start once DD Active"}
         />
         <StatCard
           label="Next collection"
-          value={summary.next ? summary.next.dueDate : "—"}
-          sub={summary.next ? `${formatMoneyAED(summary.next.amount)} · ${(c.collectionFrequency ?? c.frequency).toLowerCase()}` : "No further occurrences scheduled"}
+          value={summary.next ? `${summary.next.dueDate}${c.status === "Active" ? "" : " (planned)"}` : "—"}
+          sub={summary.next ? `${formatMoneyAED(summary.next.amount)} · ${(c.collectionFrequency ?? c.frequency).toLowerCase()}` : "No further collections scheduled"}
         />
       </div>
 
@@ -335,12 +365,14 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
             <Field label="Customer name" value={c.customerName} hint="view.customerName" />
             <Field label={c.customerIdType} value={c.customerIdNumber} hint="view.emiratesId" />
             <Field label="Email / mobile" value={`${email} · ${mobile}`} hint="create.customerEmail" />
-            <Field
-              label="Mandate reference"
-              value={c.ref || <span className="text-text-muted">{PENDING_INSTRUMENT_REF_LABEL}</span>}
-              hint="view.mandateRef"
-            />
+            {/* v2.6: the merchant reference is the DDS reference; the Central Bank reference appears once DD Active. */}
             <Field label="Merchant reference" value={c.merchantRef} hint="view.merchantRef" />
+            <Field
+              label="Central Bank reference"
+              value={centralBankRef(c) ?? <span className="text-text-muted">Issued once the contract is DD Active</span>}
+            />
+            <Field label="Contract description" value={c.contractDescription || <span className="text-text-muted">—</span>} />
+            <Field label="Store" value={c.storeName ? `${c.storeName} (${c.storeId})` : "—"} />
             <Field label="Status" value={<StatusDot status={contractStatusLabel(c)} />} hint="view.status" />
             <Field label="Created on" value={c.createdOn} hint="view.createdOn" />
             <Field label="Validity" value={`${c.commencesOn} – ${c.expiresOn}`} hint="view.validity" />
@@ -362,7 +394,7 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
                 c.maskedInstrumentRef ? (
                   <span className="inline-flex items-center gap-1.5">
                     {c.instrumentType === "Bank Account" ? <Landmark size={14} strokeWidth={1.8} /> : <CreditCard size={14} strokeWidth={1.8} />}
-                    {c.instrumentType} {c.maskedInstrumentRef}
+                    {c.instrumentType} {formatInstrumentRef(c.maskedInstrumentRef)}
                     {c.bankName ? `, ${c.bankName}` : ""}
                   </span>
                 ) : (
@@ -376,9 +408,7 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
               <Field
                 label="Signing link"
                 value={
-                  config.suppressCustomerNotifications
-                    ? "Not sent by Geidea (suppressed)"
-                    : `Sent ${resendCount}× ${c.reviewLinkExpiresAt ? `· valid until ${c.reviewLinkExpiresAt}` : ""}`
+                  `Sent ${resendCount}× (max ${MAX_RESENDS} resends) ${c.reviewLinkExpiresAt ? `· valid until ${c.reviewLinkExpiresAt}` : ""}`
                 }
                 hint="act.resend"
               />
@@ -400,7 +430,28 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
               )
             }
           />
-          <Field label="Notes" value={c.notes || <span className="text-text-muted">—</span>} hint="view.notes" />
+          <Field
+            label="Notes (merchant only)"
+            hint="view.notes"
+            value={
+              <span className="inline-flex items-center gap-2">
+                {c.notes || <span className="text-text-muted">—</span>}
+                {can("create") && (
+                  <button
+                    onClick={() => {
+                      setNotesDraft(c.notes ?? "");
+                      setNotesOpen(true);
+                    }}
+                    className="text-brand-blue"
+                    aria-label="Edit notes"
+                    data-testid="edit-notes"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                )}
+              </span>
+            }
+          />
         </div>
       </Section>
 
@@ -421,6 +472,27 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
         {c.cancelledNote && <div className="mt-2 text-xs text-text-muted">{c.cancelledNote}</div>}
       </Section>
 
+      <Section title="Activity history" right={<History size={16} className="text-text-muted" />}>
+        {c.activity && c.activity.length > 0 ? (
+          <ul className="mt-1 divide-y divide-border-color text-sm" data-testid="activity">
+            {c.activity.map((e, i) => (
+              <li key={i} className="flex gap-4 py-2">
+                <span className="w-44 shrink-0 text-text-muted">{e.at}</span>
+                <span className="w-32 shrink-0 text-text-secondary">{e.actor}</span>
+                <span className="text-text-primary">{e.text}</span>
+              </li>
+            ))}
+            <li className="flex gap-4 py-2">
+              <span className="w-44 shrink-0 text-text-muted">{c.createdOn}</span>
+              <span className="w-32 shrink-0 text-text-secondary">Merchant user</span>
+              <span className="text-text-primary">Contract created</span>
+            </li>
+          </ul>
+        ) : (
+          <div className="py-1 text-sm text-text-muted">{c.createdOn} · Merchant user · Contract created</div>
+        )}
+      </Section>
+
       {amendOpen && (
         <AmendScheduleModal
           contract={c}
@@ -432,6 +504,7 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
             setOccurrences(result);
             setScheduleVersion((v) => v + 1);
             setAmendOpen(false);
+            logActivity(c.id, "Merchant user", `Schedule amended (#${changed.join(", #")})${reason ? ` — ${reason}` : ""}`);
             setAmendNotice(
               `Schedule amended — ${changed.length} collection${changed.length === 1 ? "" : "s"} (#${changed.join(", #")}) updated, schedule version v${scheduleVersion + 1}${reason ? `. Reason: ${reason}` : ""}. Retry deadlines recalculated.`
             );
@@ -441,12 +514,19 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
 
       <Modal open={pauseModalOpen} onClose={() => setPauseModalOpen(false)}>
         <div className="p-8">
-          <h2 className="mb-2 text-xl font-bold text-text-primary">Pause this contract?</h2>
-          <p className="mb-6 text-sm text-text-secondary">
-            This suspends the <strong>subscription</strong> only — the mandate itself stays Active.
-            Collections due while paused are Skipped and not collected (they are not rolled over). Anything
-            already sent to DDS carries on. You can resume at any time.
+          <h2 className="mb-2 text-xl font-bold text-text-primary">Pause collections?</h2>
+          <p className="mb-4 text-sm text-text-secondary">
+            The contract stays DD Active — only collections stop. Collections due while paused are Skipped and not
+            collected (they are not rolled over). A collection already sent to DDS carries on. You can resume at any time.
           </p>
+          <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">Reason (optional)</label>
+          <input
+            value={pauseReason}
+            maxLength={200}
+            onChange={(e) => setPauseReason(e.target.value)}
+            className="mb-6 w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+            data-testid="pause-reason"
+          />
           <div className="flex items-center justify-end gap-4">
             <button onClick={() => setPauseModalOpen(false)} className="text-sm font-medium text-text-secondary">
               Cancel
@@ -454,29 +534,69 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
             <button
               onClick={() => {
                 setSubscriptionStatus("Paused");
+                logActivity(c.id, "Merchant user", `Collections paused${pauseReason.trim() ? ` — ${pauseReason.trim()}` : ""}`);
+                setPauseReason("");
                 setPauseModalOpen(false);
               }}
               className={clsx("rounded-lg bg-brand-blue px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-blue-hover")}
             >
-              Pause subscription
+              Pause collections
             </button>
           </div>
         </div>
       </Modal>
 
-      <Modal open={cancelModalOpen} onClose={() => setCancelModalOpen(false)}>
+      <Modal open={discardOpen} onClose={() => setDiscardOpen(false)}>
         <div className="p-8">
-          <h2 className="mb-2 text-xl font-bold text-text-primary">Cancel mandate flow — not yet available</h2>
+          <h2 className="mb-2 text-xl font-bold text-text-primary">Discard contract {c.merchantRef}?</h2>
           <p className="mb-6 text-sm text-text-secondary">
-            The cancel-mandate flow (Backend Stories S8 — reason code, customer UAE PASS cancellation signing) is
-            parked. This button is a placeholder for that flow.
+            The customer hasn&apos;t signed yet. Discarding stops the contract for good: the review link will show
+            &ldquo;no longer available&rdquo;, no collection will be made, and the merchant reference can&apos;t be reused.
+            {(c.status === "Pending Customer Sign" || c.status === "Request Expired") && " Geidea will also discard the mandate at DDS."}
           </p>
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-3">
+            <button onClick={() => setDiscardOpen(false)} className="rounded-lg border border-border-color px-5 py-2.5 text-sm font-medium">
+              Keep contract
+            </button>
             <button
-              onClick={() => setCancelModalOpen(false)}
-              className="rounded-lg bg-brand-blue px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-blue-hover"
+              onClick={() => {
+                setResendNotice(discardContract(c.id));
+                setOccurrences(c.occurrences);
+                setDiscardOpen(false);
+              }}
+              className="rounded-lg bg-status-declined px-5 py-2.5 text-sm font-semibold text-white"
+              data-testid="discard-confirm"
             >
-              Got it
+              Discard
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={notesOpen} onClose={() => setNotesOpen(false)}>
+        <div className="p-8">
+          <h2 className="mb-2 text-xl font-bold text-text-primary">Edit notes</h2>
+          <p className="mb-3 text-sm text-text-secondary">Merchant-only — never shown to the customer. Up to 1,000 characters.</p>
+          <textarea
+            value={notesDraft}
+            maxLength={1000}
+            rows={5}
+            onChange={(e) => setNotesDraft(e.target.value)}
+            className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+            data-testid="notes-input"
+          />
+          <div className="mb-5 text-right text-xs text-text-muted">{notesDraft.length} / 1,000</div>
+          <div className="flex justify-end gap-3">
+            <button onClick={() => setNotesOpen(false)} className="text-sm font-medium text-text-secondary">Cancel</button>
+            <button
+              onClick={() => {
+                editNotes(c.id, notesDraft.trim());
+                setNotesOpen(false);
+              }}
+              className="rounded-lg bg-brand-blue px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-blue-hover"
+              data-testid="notes-save"
+            >
+              Save
             </button>
           </div>
         </div>

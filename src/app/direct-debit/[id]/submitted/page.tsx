@@ -24,6 +24,7 @@ import {
   Server,
   Monitor,
   Landmark,
+  AlertTriangle,
 } from "lucide-react";
 import { useContract } from "@/lib/dd-contract-store";
 import { STORE_NAME } from "@/lib/mock-data";
@@ -90,6 +91,8 @@ function Submitted({ c }: { c: DirectDebitContract }) {
   // create flow records 0 sends when it was on (a later config change doesn't rewrite history).
   const suppressed = (c.signingNotificationCount ?? 0) === 0;
   const tbfc = c.instrumentProvidedBy === "customer";
+  // 14-Oct-2026 (US-13): DDS refused Create DDA, or didn't answer in time → Not Submitted.
+  const notSubmitted = c.status === "Not Submitted";
 
   // Review URL (S2 §6.1): https://<portal-host>/contracts/review/{mandateId}. Only rendered after
   // hydration (this component mounts once useContract is ready), so window is available.
@@ -126,9 +129,15 @@ function Submitted({ c }: { c: DirectDebitContract }) {
       {/* Header */}
       <div className="mb-6 flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
-          <CheckCircle2 size={30} className="mt-0.5 text-status-completed" />
+          {notSubmitted ? (
+            <AlertTriangle size={30} className="mt-0.5 text-status-declined" />
+          ) : (
+            <CheckCircle2 size={30} className="mt-0.5 text-status-completed" />
+          )}
           <div>
-            <h1 className="text-2xl font-bold text-text-primary">Contract submitted</h1>
+            <h1 className="text-2xl font-bold text-text-primary" data-testid="submitted-title">
+              {notSubmitted ? "Contract not submitted" : "Contract submitted"}
+            </h1>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-text-secondary">
               <span>
                 Merchant reference <strong className="text-text-primary">{c.merchantRef}</strong>
@@ -137,7 +146,11 @@ function Submitted({ c }: { c: DirectDebitContract }) {
               <StatusDot status={contractStatusLabel(c)} />
             </div>
             <p className="mt-1.5 max-w-3xl text-[13px] text-text-muted">
-              {tbfc
+              {notSubmitted
+                ? c.notSubmittedKind === "unknown"
+                  ? `DDS didn't answer in time, so the outcome is unknown. Contact Geidea support quoting ${c.merchantRef}; the Backend checks with DDS before any resubmission. No link was sent to the customer.`
+                  : `DDS refused the contract${c.notSubmittedReason ? ` — ${c.notSubmittedReason.replace(/\.$/, "")}` : ""}. Nothing was sent to the customer. Correct the details and resubmit with the same merchant reference.`
+                : tbfc
                 ? "Held locally by the DD Backend — DDS isn't called until the customer enters their payment instrument on the review page."
                 : "Registered with DDS. The customer now verifies, reviews and signs via UAE PASS."}
             </p>
@@ -282,7 +295,12 @@ function Submitted({ c }: { c: DirectDebitContract }) {
               <FieldHint k="notif.template" />
             </div>
 
-            {suppressed ? (
+            {notSubmitted ? (
+              <div className="mt-3 rounded-lg border border-status-declined/40 bg-status-declined/5 p-5 text-sm text-text-secondary" data-testid="notifications-not-sent">
+                <div className="font-semibold text-text-primary">Nothing sent</div>
+                The contract wasn&apos;t registered with DDS, so no review &amp; signing link went to the customer.
+              </div>
+            ) : suppressed ? (
               <div
                 className="mt-3 flex items-start gap-3 rounded-lg border border-status-pending/50 bg-status-pending/10 p-5 text-sm text-text-secondary"
                 data-testid="notifications-suppressed"

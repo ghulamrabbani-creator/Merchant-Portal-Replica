@@ -98,10 +98,10 @@ function ExpandableSection({
 export default function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
-  const { config } = useDDConfig();
-  // "Enable Direct Debit" in PGW Config in MA — off hides the menu item only (the /direct-debit
-  // route itself stays reachable if someone hits the URL directly; scope confirmed with Rabbani).
-  const navItems = config.featureEnabled
+  const { config, can } = useDDConfig();
+  // "Enable Direct Debit" in PGW Config in MA, AND the user's View Direct Debit permission
+  // (US-01). The /direct-debit route itself also refuses a user without View (14-Oct-2026).
+  const navItems = config.featureEnabled && can("view")
     ? allNavItems
     : allNavItems.filter((item) => item.href !== "/direct-debit");
 

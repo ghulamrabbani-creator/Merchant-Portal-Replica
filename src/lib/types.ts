@@ -205,14 +205,27 @@ export const DDS_BANKS = [
 export type DDInstrumentType = "Bank Account" | "Credit Card";
 export type DDAmountType = "Fixed" | "Variable";
 
+// Internal status values (14-Oct-2026, MP Backlog v2 / Confluence v2.5). The merchant never sees
+// these raw — contractStatusLabel() in lib/direct-debit.ts turns them into the ONE status list:
+// DDS statuses carry the "DD" tag (DD Pending, DD Active, ...), Geidea-only statuses carry none.
+// "Suspended" removed (Phase 2).
 export type DDContractStatus =
-  | "Active"
-  | "Awaiting Customer Details"
-  | "Pending Customer Sign"
-  | "Pending Bank Approval"
-  | "Suspended"
-  | "Rejected"
-  | "Cancelled";
+  // Geidea-only
+  | "Awaiting Customer Details" // TBFC: nothing at DDS yet
+  | "Not Submitted" // DDS refused the create request, or its outcome is unknown
+  | "Link Expired" // review link expired before the customer finished
+  | "Discarded" // merchant discarded the unsigned contract
+  // DDS (shown with the DD tag); "Cancelled" + closureReasonCode = Geidea's "Cancelled — reason"
+  | "Pending Customer Sign" // PNDG → DD Pending
+  | "Pending System Submission" // SUBP
+  | "Pending Bank Approval" // APRP
+  | "Active" // ACCP
+  | "Rejected" // RJCT
+  | "Denied" // DENY
+  | "Request Expired" // RQXP
+  | "Error" // ERR — final
+  | "Cancelled" // CANC (or Geidea closure when closureReasonCode is set)
+  | "Expired"; // EXPR
 // Note (25-Sep-2026): a contract closed by a terminal refusal keeps status "Cancelled" and carries
 // the reason in `closureReasonCode` — the UI renders it as "Cancelled — <reason label>" per
 // Backend Stories S6 §2.1 (Mandate.status_label).
@@ -261,7 +274,10 @@ export type DDOccurrenceStatus =
   | "Rejected"
   | "Failed"
   | "Skipped"
-  | "Cancelled";
+  | "Cancelled"
+  // Added 14-Oct-2026: Payment ERR. Can be retried within the same 3 retries / deadline when the
+  // new debit date keeps the minimum gap (Confluence v2.5 B8, S6 §1.1).
+  | "Error";
 
 /** Occurrence.skip_reason (S5 check C3/C6, S7 §1). */
 export type DDSkipReason = "paused" | "min_gap" | "not_active_in_time" | "missed_submission";
@@ -343,7 +359,7 @@ export interface DirectDebitContract {
    *  the moment the customer submits that step, same as every other instrument field. */
   instrumentType?: DDInstrumentType;
   bankName?: string; // Bank Account only
-  maskedInstrumentRef: string; // masked IBAN or card, e.g. "•••1095"
+  maskedInstrumentRef: string; // full IBAN (shown in full, v2.6) or masked card, e.g. "•••1095"
   commencesOn: string; // "05 Sep 2026" — mandate validity start
   expiresOn: string; // mandate validity end
   frequency: DDFrequency; // contract frequency ceiling
@@ -397,6 +413,24 @@ export interface DirectDebitContract {
   /** Banner shown on the Contract Detail screen while mandateCreationStage is still
    *  "awaiting_customer_instrument" — mirrors pausedNote/cancelledNote's pattern above. */
   awaitingInstrumentNote?: string;
+  // ---- Added 14-Oct-2026 (MP Backlog v2) ----
+  /** Store (MID) the contract belongs to — one store per contract (B16). */
+  storeId?: string;
+  storeName?: string;
+  /** Not Submitted outcome (US-13): "rejected" = DDS refused (correct and resubmit, same
+   *  reference); "unknown" = no answer from DDS (contact support). */
+  notSubmittedKind?: "rejected" | "unknown";
+  notSubmittedReason?: string;
+  /** Mandate reason label for DD Rejected / Denied / Error (e.g. RR05 "Account name doesn't match"). */
+  mandateReason?: string;
+  /** Activity history (US-32), newest first. */
+  activity?: DDActivityEvent[];
+}
+
+export interface DDActivityEvent {
+  at: string; // "14 Oct 2026, 10:15 AM"
+  actor: string; // "Merchant user", "Customer", "System", "DDS"
+  text: string;
 }
 
 /** POST /direct-debit/v1/contracts request body — Backend Stories S2 §3a, field names exactly as
