@@ -39,7 +39,15 @@ import { CustomerPageHeader } from "@/components/directdebit/CustomerVerificatio
 // (Geidea submits the signed contract to DDS; DD Pending Bank Approval follows), not straight on
 // Pending Bank Approval.
 type SignStep = "instrument" | "review" | "fetching" | "unsigned" | "signing" | "signed" | "sign_failed" | "iban_failed" | "not_completed";
-type SignOutcome = "signed" | "sign_failed" | "iban_failed" | "not_completed";
+// 15-Oct-2026: outcomes follow DDS's UAE PASS Signature API v1.4 — callback status finished /
+// failed (with statusMsg) / canceled / ddsError. IBAN validation runs at DDS before UAE PASS opens.
+type SignOutcome = "finished" | "iban_format" | "iban_bank" | "iban_details" | "iban_eid" | "failed_other" | "canceled" | "ddsError";
+const IBAN_MSG: Record<string, { statusMsg: string; text: string }> = {
+  iban_format: { statusMsg: "iban validation failed : Invalid format", text: "Your bank account details are not in a valid format." },
+  iban_bank: { statusMsg: "iban validation failed : DDS could'nt find bank", text: "Your bank is not available for direct debit." },
+  iban_details: { statusMsg: "iban validation failed : DDS could'nt find details", text: "Your bank account details could not be found." },
+  iban_eid: { statusMsg: "iban validation failed : DDS could'nt match the details when idType = EI", text: "Your Emirates ID does not match this bank account." },
+};
 
 export default function ContractReviewSign({ contract }: { contract: DirectDebitContract }) {
   const id = contract.id;
@@ -48,7 +56,7 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
   const [step, setStep] = useState<SignStep>(
     found?.mandateCreationStage === "awaiting_customer_instrument" ? "instrument" : "review"
   );
-  const [outcome, setOutcome] = useState<SignOutcome>("signed");
+  const [outcome, setOutcome] = useState<SignOutcome>("finished");
 
   // TBFC instrument-capture form state. Corrected 09-Sep-2026 (Rabbani): under TBFC the whole
   // instrument choice — which TYPE, not just its account/card details — belongs to the customer,
@@ -79,8 +87,10 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
     }
     if (step === "signing") {
       const t = setTimeout(() => {
-        setStep(outcome);
-        if (outcome !== "signed") return;
+        const next: SignStep =
+          outcome === "finished" ? "signed" : outcome in IBAN_MSG ? "iban_failed" : outcome === "canceled" ? "not_completed" : "sign_failed";
+        setStep(next);
+        if (next !== "signed") return;
         // After a successful signature: Pending System Submission (14-Oct-2026, US-33/US-14).
         const target = directDebitContracts.find((x) => x.id === id);
         if (target) {
@@ -431,10 +441,14 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
               <div className="mx-auto mb-4 flex max-w-md items-center gap-2 rounded-lg border border-dashed border-fuchsia-400 px-3 py-2 text-[12px] text-fuchsia-700">
                 Prototype — simulate UAE PASS result:
                 <select value={outcome} onChange={(e) => setOutcome(e.target.value as SignOutcome)} className="rounded border border-fuchsia-300 bg-white px-1 py-0.5" data-testid="sign-outcome">
-                  <option value="signed">Signed</option>
-                  <option value="sign_failed">Signing failed</option>
-                  <option value="iban_failed">IBAN verification failed</option>
-                  <option value="not_completed">Customer didn&apos;t complete</option>
+                  <option value="finished">finished — signed</option>
+                  <option value="iban_format">failed — IBAN: invalid format</option>
+                  <option value="iban_bank">failed — IBAN: bank not found</option>
+                  <option value="iban_details">failed — IBAN: details not found</option>
+                  <option value="iban_eid">failed — IBAN: Emirates ID doesn&apos;t match</option>
+                  <option value="failed_other">failed — other UAE PASS error</option>
+                  <option value="canceled">canceled — customer left</option>
+                  <option value="ddsError">ddsError</option>
                 </select>
               </div>
               <div className="inline-flex items-center gap-1.5">
@@ -473,6 +487,9 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
           )}
           {(step === "sign_failed" || step === "iban_failed" || step === "not_completed") && (
             <div className="flex flex-col items-center gap-2" data-testid={`sign-${step}`}>
+              {step === "iban_failed" && (
+                <div className="font-mono text-[10.5px] text-fuchsia-700">statusMsg: {IBAN_MSG[outcome]?.statusMsg}</div>
+              )}
               <div className="text-sm font-semibold text-text-primary">
                 {step === "sign_failed"
                   ? "Signing didn't go through."
@@ -482,9 +499,11 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
               </div>
               <div className="max-w-md text-[12.5px] text-text-muted">
                 {step === "sign_failed"
-                  ? "Something went wrong with UAE PASS. Nothing has been signed — please try again."
+                  ? outcome === "ddsError"
+                    ? "Something went wrong on our side. Nothing has been signed — please try again."
+                    : "Something went wrong with UAE PASS. Nothing has been signed — please try again."
                   : step === "iban_failed"
-                    ? `UAE PASS couldn't confirm the IBAN belongs to you. Contact ${STORE_NAME} to correct the account details.`
+                    ? `${IBAN_MSG[outcome]?.text ?? "Your bank details could not be verified."} Please contact ${STORE_NAME}.`
                     : "You left UAE PASS before signing. Your link is still valid — you can sign whenever you're ready."}
               </div>
               {step !== "iban_failed" && (

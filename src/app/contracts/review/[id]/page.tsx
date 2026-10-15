@@ -27,7 +27,7 @@ type PageState = "NOT_AVAILABLE" | "ALREADY_SIGNED" | "EXPIRED" | "OTP_REQUIRED"
 // refused/closed status → NOT_AVAILABLE; Link Expired / DD Request Expired → EXPIRED; anything
 // signed (Pending System Submission onward, incl. Expired at end of term) → ALREADY_SIGNED.
 function initialPageState(c: DirectDebitContract | undefined): PageState {
-  if (!c || ["Cancelled", "Rejected", "Denied", "Error", "Discarded", "Not Submitted"].includes(c.status)) return "NOT_AVAILABLE";
+  if (!c || ["Cancelled", "Rejected", "Error", "Discarded", "Not Submitted"].includes(c.status)) return "NOT_AVAILABLE";
   if (["Pending System Submission", "Pending Bank Approval", "Active", "Expired"].includes(c.status)) return "ALREADY_SIGNED";
   if (c.status === "Link Expired" || c.status === "Request Expired") return "EXPIRED";
   if (c.reviewLinkExpiresAt && diffDays(ddToday(), parseNiceDate(c.reviewLinkExpiresAt)) < 0) return "EXPIRED";

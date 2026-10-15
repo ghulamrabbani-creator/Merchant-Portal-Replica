@@ -5,7 +5,7 @@
 // mapping in Backend Stories S2 (§3a request, §4c Create DDA mapping, §8 response).
 
 import { DDCreateContractRequest, DirectDebitContract } from "./types";
-import { addDays, formatDateNice, parseDateStr } from "./direct-debit";
+import { addDays, formatDateNice, fullMerchantRef, parseDateStr } from "./direct-debit";
 
 /** YYYY-MM-DD → dd/MM/yyyy (the DDS client's date format, S1 §6.3). */
 function ddsDate(iso: string): string {
@@ -29,7 +29,8 @@ export function ddsCreateDdaBody(req: DDCreateContractRequest): Record<string, u
     customerFullName: req.customerName,
     customerEmail: req.customerEmail,
     customerMobileNumber: req.customerMobile,
-    ddaReferenceNumber: req.merchantReference,
+    // 15-Oct-2026: Geidea reference code + the merchant's own reference (Confluence v2.5 S2).
+    ddaReferenceNumber: fullMerchantRef(req.merchantReference),
     customerType: "Individual",
     customerIdType: "UAE Emirates Identity Card",
     customerIdNumber: req.emiratesId.replace(/\D/g, ""),
@@ -71,6 +72,7 @@ export function beResponseBody(
     data: {
       mandateId: c.id,
       merchantReference: req.merchantReference,
+      ddaReferenceNumber: fullMerchantRef(req.merchantReference),
       ddaId: tbfc ? null : "164132",
       status: tbfc ? null : "PNDG",
       statusLabel: tbfc ? "Awaiting Customer Details" : "Pending",

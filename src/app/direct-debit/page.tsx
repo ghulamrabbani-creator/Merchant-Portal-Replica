@@ -38,7 +38,7 @@ function collectionSummary(occurrences: DirectDebitOccurrence[]) {
 const sumAmt = (xs: { amount: number }[]) => xs.reduce((t, o) => t + o.amount, 0);
 
 /** US-03 (14-Oct-2026): every card is computed from all contracts in the selected stores. Total Collections = Paid only (TB-1); Failed = Failed only; Declined =
- *  DD Rejected + DD Denied + DD Error. */
+ *  DD Rejected + DD Error (no DD Denied — banks do not support DENY, DDS 15-Oct-2026). */
 function computeKpis(list: DirectDebitContract[]) {
   const active = list.filter((c) => c.status === "Active");
   const pendingSign = list.filter((c) => c.status === "Awaiting Customer Details" || c.status === "Pending Customer Sign");
@@ -46,7 +46,7 @@ function computeKpis(list: DirectDebitContract[]) {
   const paid = list.flatMap((c) => c.occurrences.filter((o) => o.status === "Paid"));
   const failedByContract = list.map((c) => c.occurrences.filter((o) => o.status === "Failed")).filter((x) => x.length > 0);
   const failed = failedByContract.flat();
-  const declined = list.filter((c) => c.status === "Rejected" || c.status === "Denied" || c.status === "Error");
+  const declined = list.filter((c) => c.status === "Rejected" || c.status === "Error");
   return {
     active: { n: active.length, value: sumAmt(active.map((c) => ({ amount: c.maxAmount }))) },
     pendingSign: { n: pendingSign.length, awaiting: pendingSign.filter((c) => c.status === "Awaiting Customer Details").length },
@@ -223,7 +223,7 @@ export default function DirectDebitPage() {
           <StatCard label="Pending Bank Approval" value={String(kpi.pendingBank.n)} sub="Submitted or approved by the paying bank" />
           <StatCard label="Total Collections" value={String(kpi.paid.n)} sub={`${formatMoneyAED(kpi.paid.amount)} collected (Paid only)`} />
           <StatCard label="Failed Collections" value={formatMoneyAED(kpi.failed.amount)} sub={`${kpi.failed.n} collections · ${kpi.failed.contracts} contracts`} />
-          <StatCard label="Declined Contracts" value={String(kpi.declined.n)} sub="DD Rejected, DD Denied or DD Error" />
+          <StatCard label="Declined Contracts" value={String(kpi.declined.n)} sub="DD Rejected or DD Error" />
         </div>
       )}
 

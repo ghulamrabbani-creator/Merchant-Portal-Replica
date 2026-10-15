@@ -39,7 +39,7 @@ const colorMap: Record<string, string> = {
   "DD Pending System Submission": "bg-status-pending",
   "DD Pending Bank Approval": "bg-status-pending",
   "DD Rejected": "bg-status-declined",
-  "DD Denied": "bg-status-declined",
+  "Payment validation error": "bg-status-declined",
   "DD Request Expired": "bg-status-declined",
   "DD Error": "bg-status-declined",
   "DD Cancelled": "bg-status-declined",

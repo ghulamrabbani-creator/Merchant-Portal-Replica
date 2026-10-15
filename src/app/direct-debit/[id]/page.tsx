@@ -31,6 +31,7 @@ import {
   isAmendable,
   isUnsigned,
   outstandingAmount,
+  paymentRef,
   centralBankRef,
   formatInstrumentRef,
 } from "@/lib/direct-debit";
@@ -227,7 +228,7 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
                   !can("amend")
                     ? "Your role doesn't include the Amend Collection permission."
                     : !canAmendAny
-                      ? "No upcoming Scheduled collection that can still be changed."
+                      ? "No upcoming Scheduled collection, or collection in Error, that can still be changed."
                       : "Change the date or amount of upcoming collections"
                 }
                 className="flex items-center gap-2 rounded-lg border border-border-color bg-white px-4 py-2.5 text-sm font-medium text-text-primary hover:border-text-muted disabled:cursor-not-allowed disabled:text-text-muted"
@@ -317,7 +318,7 @@ Customer: ${c.customerName}`)}`}
             : `DDS refused the contract${c.notSubmittedReason ? `: ${c.notSubmittedReason.replace(/\.$/, "")}` : ""}. Correct the details and resubmit with the same merchant reference, or discard it.`}
         </div>
       )}
-      {c.mandateReason && (c.status === "Rejected" || c.status === "Denied" || c.status === "Error" || c.status === "Request Expired") && (
+      {c.mandateReason && (c.status === "Rejected" || c.status === "Error" || c.status === "Request Expired") && (
         <div className="mb-5 rounded-lg border border-status-declined/60 bg-status-declined/5 px-4 py-2.5 text-sm text-text-primary">
           <b>{contractStatusLabel(c)}:</b> {c.mandateReason}
         </div>
@@ -463,6 +464,7 @@ Customer: ${c.customerName}`)}`}
               occurrences={occurrences}
               subscriptionStatus={subscriptionStatus}
               onRetry={(seq) => setOccurrences((prev) => applyRetrySubmitted(prev, seq))}
+              onAmend={c.status === "Active" ? () => { setAmendNotice(null); setAmendOpen(true); } : undefined}
               onSimulate={(seq, r) => setOccurrences((prev) => applyRetryResult(c, prev, seq, r))}
             />
           </div>
@@ -506,7 +508,11 @@ Customer: ${c.customerName}`)}`}
             setAmendOpen(false);
             logActivity(c.id, "Merchant user", `Schedule amended (#${changed.join(", #")})${reason ? ` — ${reason}` : ""}`);
             setAmendNotice(
-              `Schedule amended — ${changed.length} collection${changed.length === 1 ? "" : "s"} (#${changed.join(", #")}) updated, schedule version v${scheduleVersion + 1}${reason ? `. Reason: ${reason}` : ""}. Retry deadlines recalculated.`
+              `Schedule amended — ${changed.length} collection${changed.length === 1 ? "" : "s"} (#${changed.join(", #")}) updated, schedule version v${scheduleVersion + 1}${reason ? `. Reason: ${reason}` : ""}. Retry deadlines recalculated.` +
+                result
+                  .filter((o) => changed.includes(o.seq) && o.paymentSeq && occurrences.find((x) => x.seq === o.seq)?.status === "Error")
+                  .map((o) => ` #${o.seq} was in Error: it is Scheduled again and will be sent with the new payment reference ${paymentRef(c.merchantRef, o.paymentSeq!)}.`)
+                  .join("")
             );
           }}
         />

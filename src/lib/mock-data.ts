@@ -9,7 +9,7 @@ import {
   DirectDebitOccurrence,
   DDFrequency,
 } from "./types";
-import { occurrenceBaseDate, formatDateNice, ddToday, addDays, toDateInputValue, formatCreatedOn, parseDateStr } from "./direct-debit";
+import { occurrenceBaseDate, formatDateNice, ddToday, addDays, toDateInputValue, formatCreatedOn, parseDateStr, DD_REFERENCE_CODE } from "./direct-debit";
 
 export const STORE_NAME = "Acme Retail Demo LLC";
 
@@ -482,7 +482,7 @@ const DD12_START = shiftMonthsIso(DD12_P2, -1);
 const DD13_START = relIso(-14);
 // dd14 — amend demo: #1 paid 20 days ago, 11 upcoming collections to amend.
 const DD14_START = relIso(-20);
-// dd15 — #1 paid a month before #2; #2 (due 3 days ago) came back in Error and is still inside its retry window.
+// dd15 — #1 paid a month before #2; #2 (due 3 days ago) came back in Error (payment validation error).
 const DD15_START = shiftMonthsIso(relIso(-3), -1);
 
 function genOccurrences(
@@ -990,16 +990,16 @@ export const directDebitContracts: DirectDebitContract[] = [
       1: { status: "Paid", rolledOver: "none", collectedOn: nice(DD14_START), payoutStatus: "Settled", reasonCode: "0" },
     }),
   },
-  // dd15 — new 14-Oct-2026 (Confluence v2.5 B8 / S6): a collection that came back ERR (Error) can
-  // now be retried, within the same 3 retries and retry deadline, when the debit it would get keeps
-  // the DDS minimum gap from the previous actual debit.
+  // dd15 — (Confluence v2.5 B8 / S7, DDS 15-Oct-2026): a collection that came back ERR is a payment
+  // validation error — DDS can't represent it. No Retry, no bounce memo; the merchant re-sets it with
+  // Amend schedule and it is sent again with a new payment reference.
   {
     id: "dd15",
     ref: "DD-2026-00158",
     merchantRef: "INV-2026-09105",
     contractDescription: "Monthly school transport fee, 2026/27.",
     createdOn: formatCreatedOn(addDays(parseDateStr(DD15_START), -9)),
-    customerName: "Error Collection", // demo: #2 in Error, retryable (v2.5)
+    customerName: "Error Collection", // demo: #2 in Error — re-set through Amend
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1991-2233445-6",
     customerEmail: "r.saleh@example.com",
@@ -1022,7 +1022,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     subscriptionStatus: "Active",
     occurrences: genOccurrences(DD15_START, "Monthly", 10, 1500, {
       1: { status: "Paid", rolledOver: "none", collectedOn: nice(DD15_START), payoutStatus: "Settled", reasonCode: "0" },
-      2: { status: "Error", rolledOver: "none", retryCount: 0, payoutStatus: "—", note: "DDS returned ERR (technical error at DDS / Central Bank) — can be retried (v2.5)" },
+      2: { status: "Error", rolledOver: "none", retryCount: 0, payoutStatus: "—", note: "DDS: frequency rule not met (debit too close to the previous one)" },
     }),
   },
   // dd16 — signed, on its way to the bank (DD Pending System Submission, SUBP — US-14).
@@ -1156,6 +1156,8 @@ export const DD_STORES = [
   { id: "10002182201", name: "Acme Retail — Online" },
 ];
 directDebitContracts.forEach((c, i) => {
+  // 15-Oct-2026: the 5-digit Geidea reference code goes in front of every merchant reference.
+  if (!/^\d{5}-/.test(c.merchantRef)) c.merchantRef = `${DD_REFERENCE_CODE}-${c.merchantRef}`;
   // 14-Oct-2026 (decision 11): bank-account demo contracts carry a full IBAN, shown in full.
   if (c.instrumentType === "Bank Account" && c.maskedInstrumentRef.startsWith("•••")) {
     const last4 = c.maskedInstrumentRef.replace(/\D/g, "").padStart(4, "0");

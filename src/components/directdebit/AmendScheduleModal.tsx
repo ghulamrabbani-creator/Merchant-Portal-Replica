@@ -128,7 +128,8 @@ export default function AmendScheduleModal({
         </h2>
         <p className="mb-4 text-[13px] text-text-muted">
           Change the due date{fixed ? "" : " and/or amount"} of any upcoming collection that hasn&apos;t been sent to
-          DDS yet. All changes are checked together against the resulting schedule and saved all-or-nothing.
+          DDS yet, or re-set a collection in <strong>Error</strong> (payment validation error) — give it a new date; it
+          is sent again with a new payment reference. All changes are checked together against the resulting schedule and saved all-or-nothing.
           {fixed && " This is a Fixed-amount contract, so only dates can change."} DDS needs at least{" "}
           <strong>{gap} days</strong> between two debits on a {contract.frequency} mandate — if moving one date
           brings it too close to the next collection, move that one as well in the same save.
@@ -156,7 +157,10 @@ export default function AmendScheduleModal({
                     className={clsx("border-t border-border-color align-top", errs.length && "bg-status-expired/5")}
                     data-testid={`amend-row-${o.seq}`}
                   >
-                    <td className="px-3 py-2 text-text-muted">{o.seq}</td>
+                    <td className="px-3 py-2 text-text-muted">
+                      {o.seq}
+                      {o.status === "Error" && <div className="text-[10.5px] font-semibold text-status-declined">Error</div>}
+                    </td>
                     <td className="px-3 py-2">{o.dueDate}</td>
                     <td className="px-3 py-2 font-semibold">{formatMoneyAED(o.amount)}</td>
                     {d ? (

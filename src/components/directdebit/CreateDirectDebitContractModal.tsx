@@ -25,6 +25,9 @@ import {
   parseDateStr,
   toDateInputValue,
   activityEvent,
+  DD_REFERENCE_CODE,
+  MERCHANT_REF_MAX,
+  fullMerchantRef,
   validateCardNumber,
   validateEmiratesId,
   validateIban,
@@ -377,7 +380,7 @@ export default function CreateDirectDebitContractModal({
       // TBFC: Create DDA hasn't been called, so DDS has issued nothing yet — no reference until
       // the customer completes the instrument step on the Sign page. See PENDING_INSTRUMENT_REF_LABEL.
       ref: tbfc ? "" : nextContractRef(directDebitContracts),
-      merchantRef,
+      merchantRef: fullMerchantRef(merchantRef),
       notes: notes.trim() || undefined,
       contractDescription: contractDescription.trim() || undefined,
       createdOn: formatCreatedOn(new Date()),
@@ -519,12 +522,26 @@ export default function CreateDirectDebitContractModal({
 
               <div className="mb-4">
                 <Label hint="create.merchantReference" hintValue={JSON.stringify(merchantRef)}>Merchant reference number</Label>
-                <input
-                  value={merchantRef}
-                  onChange={(e) => setMerchantRef(e.target.value)}
-                  className="w-full max-w-xs rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
-                />
-                <Help>3–26 characters: letters, digits, space and - / : . _ — unique, and never reusable (even after a discard).</Help>
+                <div className="flex max-w-sm items-stretch">
+                  <span
+                    className="flex items-center rounded-l-lg border border-r-0 border-border-color bg-page-bg px-3 font-mono text-sm text-text-secondary"
+                    title="Your Geidea reference code — added in front of every reference so it stays unique (set when Direct Debit was enabled)"
+                    data-testid="ref-code"
+                  >
+                    {DD_REFERENCE_CODE}-
+                  </span>
+                  <input
+                    value={merchantRef}
+                    maxLength={MERCHANT_REF_MAX}
+                    onChange={(e) => setMerchantRef(e.target.value)}
+                    className="w-full rounded-r-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+                    data-testid="merchant-ref"
+                  />
+                </div>
+                <Help>
+                  3–{MERCHANT_REF_MAX} characters: letters, digits, space and - / : . _ — unique, and never reusable (even after a
+                  discard). This full reference ({DD_REFERENCE_CODE}-…) is what the customer sees on the signed mandate form.
+                </Help>
               </div>
 
               <div className="mb-4">
@@ -1038,7 +1055,7 @@ export default function CreateDirectDebitContractModal({
 
               <div className="flex flex-col gap-3">
                 <ReviewRow label="Customer" value={`${customerName} · ${customerIdNumber}`} />
-                <ReviewRow label="Merchant reference" value={merchantRef} />
+                <ReviewRow label="Merchant reference" value={fullMerchantRef(merchantRef)} />
                 <ReviewRow
                   label="Contract description"
                   value={contractDescription.trim() || "Not set — customer will only see your company name"}
@@ -1090,7 +1107,7 @@ export default function CreateDirectDebitContractModal({
 
               <div className="mt-4 flex flex-col gap-2.5 border-t border-border-color pt-3.5 text-[13px]">
                 <SummaryRow label="Customer" value={customerName} />
-                <SummaryRow label="Merchant ref" value={merchantRef} />
+                <SummaryRow label="Merchant ref" value={fullMerchantRef(merchantRef)} />
                 {showDescriptionInPanel && (
                   <SummaryRow label="Description" value={contractDescription} />
                 )}

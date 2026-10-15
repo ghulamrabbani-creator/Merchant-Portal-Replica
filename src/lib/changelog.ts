@@ -15,7 +15,7 @@ export interface ChangelogEntry {
   description: string;
 }
 
-export const LAST_UPDATED = "14 Oct 2026";
+export const LAST_UPDATED = "15 Oct 2026";
 
 // Full history below covers Direct Debit specifically, back to its first release on the portal
 // (01 Sep 2026) — compiled 09 Sep 2026 from the repo's commit history across every session so far.
@@ -27,6 +27,11 @@ export const LAST_UPDATED = "14 Oct 2026";
 // pass on GitHub. Corrected back to match the actual shipped code (customer picks under TBFC,
 // confirmed live by Rabbani on 10-Sep-2026) rather than silently left stale.
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    date: "15 Oct 2026",
+    description:
+      "Direct Debit aligned to DDS's answers of 15-Oct-2026 (MP Backlog v2.2, Confluence v2.5). (1) A collection in Error is no longer retried (DDS represents rejected payments only): it shows \"Payment validation error\", has no Retry and no bounce memo, and is re-set with Amend schedule — it becomes Scheduled again with a new payment reference (next unused number, e.g. …-000013); the earlier attempt stays in its history. Try it on \"Error Collection\". (2) DD Denied removed (banks don't support DENY); Declined = Rejected + Error. (3) Geidea reference code: a 5-digit code (48213 in the prototype) sits in front of every merchant reference; the merchant types up to 20 characters; shown read-only in PGW Config. (4) Collection rows show their payment reference once sent. (5) Customer signing outcomes follow DDS's UAE PASS Signature API v1.4 (finished / failed with the exact IBAN message / canceled / ddsError).",
+  },
   {
     date: "14 Oct 2026",
     description:

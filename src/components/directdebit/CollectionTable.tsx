@@ -12,8 +12,9 @@
 //  - New Retry deadline column (S6 §1.2): next collection's due date − DDS min gap − 1 working day.
 //  - Status shows the DDS reason label (S5 §3.3), the skip reason, and "Representment Pending"
 //    while a retry is with DDS.
-// 14-Oct-2026 (MP Backlog v2 US-18/US-22/US-26): an Error collection is retryable like Rejected
-// (Failed stays final); reasons show on Rejected / Error / Failed; a bounce memo download appears on
+// 15-Oct-2026 (MP Backlog v2.2 US-18/US-19/US-22/US-26; DDS: representment is for RJCT only): an
+// Error collection shows "Payment validation error" — no Retry, no bounce memo — and is re-set with
+// Amend schedule (new payment reference). Reasons show on Rejected / Failed; a bounce memo appears on
 // any collection rejected at least once; Retry is gated by the role's Retry permission.
 
 import clsx from "clsx";
@@ -30,6 +31,8 @@ import {
   formatDateNice,
   formatMoneyAED,
   hasBounceMemo,
+  paymentRef,
+  sentPaymentRef,
   isTerminalReasonCode,
   parseNiceDate,
   reasonLabel,
@@ -74,6 +77,7 @@ export default function CollectionTable({
   subscriptionStatus,
   onRetry,
   onSimulate,
+  onAmend,
   headerBg = "bg-page-bg",
 }: {
   contract: DirectDebitContract;
@@ -81,6 +85,8 @@ export default function CollectionTable({
   subscriptionStatus: DDSubscriptionStatus;
   onRetry: (seq: number) => void;
   onSimulate?: (seq: number, result: "ACCP" | "RJCT") => void;
+  /** Opens Amend schedule (Contract Detail only) — the action for a collection in Error. */
+  onAmend?: () => void;
   headerBg?: string;
 }) {
   const { can, devHints } = useDDConfig();
@@ -90,8 +96,8 @@ export default function CollectionTable({
     const inRetry = o.paymentStatus === "RPND";
     return (
       <>
-        <StatusDot status={inRetry ? "Representment Pending" : o.status} />
-        {(o.status === "Rejected" || o.status === "Failed" || o.status === "Error") && o.reasonCode && o.reasonCode !== "0" && (
+        <StatusDot status={inRetry ? "Representment Pending" : o.status === "Error" ? "Payment validation error" : o.status} />
+        {(o.status === "Rejected" || o.status === "Failed") && o.reasonCode && o.reasonCode !== "0" && (
           <div
             className={clsx(
               "mt-0.5 max-w-[260px] text-[11px]",
@@ -106,6 +112,19 @@ export default function CollectionTable({
           <div className="mt-0.5 max-w-[260px] text-[11px] text-text-muted">{SKIP_REASON_TEXT[o.skipReason]}</div>
         )}
         {o.note && <div className="mt-0.5 max-w-[260px] text-[11px] text-text-muted">{o.note}</div>}
+        {sentPaymentRef(contract.merchantRef, o) && (
+          <div className="mt-0.5 font-mono text-[10.5px] text-text-muted" data-testid={`payref-${o.seq}`}>{sentPaymentRef(contract.merchantRef, o)}</div>
+        )}
+        {o.status === "Scheduled" && o.paymentSeq && (
+          <div className="mt-0.5 text-[10.5px] text-text-muted" data-testid={`newref-${o.seq}`}>
+            Re-set after an error · new reference <span className="font-mono">{paymentRef(contract.merchantRef, o.paymentSeq)}</span>
+          </div>
+        )}
+        {(o.errorHistory ?? []).map((h, i) => (
+          <div key={i} className="mt-0.5 text-[10.5px] text-text-muted">
+            Earlier attempt <span className="font-mono">{paymentRef(contract.merchantRef, Number(h.paymentRef))}</span> ({h.dueDate}): {h.message}
+          </div>
+        ))}
       </>
     );
   }
@@ -121,7 +140,8 @@ export default function CollectionTable({
     const due = parseNiceDate(o.dueDate);
     const left = diffDays(today, d);
     const noWindow = diffDays(due, d) <= 0;
-    if (o.status === "Rejected" || o.status === "Error" || o.paymentStatus === "RPND") {
+    if (o.status === "Error") return <span className="text-text-muted">No retry — re-set with Amend</span>;
+    if (o.status === "Rejected" || o.paymentStatus === "RPND") {
       return (
         <div>
           <div className={clsx("font-medium", left < 0 ? "text-status-expired" : "text-text-primary")}>{formatDateNice(d)}</div>
@@ -173,7 +193,21 @@ export default function CollectionTable({
         <FileDown size={12} /> Bounce memo
       </a>
     ) : null;
-    if (o.status !== "Rejected" && o.status !== "Error") return memo;
+    if (o.status === "Error") {
+      if (!onAmend) return <span className="text-[11px] text-text-muted">Re-set from Contract Detail</span>;
+      return (
+        <button
+          onClick={onAmend}
+          disabled={!can("amend")}
+          title={can("amend") ? "Give this collection a new date (and amount) — it is sent again with a new payment reference" : "Your role doesn't include the Amend Collection permission."}
+          className="rounded-md border border-brand-blue px-2.5 py-1 text-xs font-medium text-brand-blue hover:bg-brand-blue/5 disabled:cursor-not-allowed disabled:border-border-color disabled:text-text-muted"
+          data-testid={`reset-${o.seq}`}
+        >
+          Re-set (Amend)
+        </button>
+      );
+    }
+    if (o.status !== "Rejected") return memo;
     const e = retryEligibility(contract, subscriptionStatus, occurrences, o, can("retry"), today);
     const count = o.retryCount ?? 0;
     return (

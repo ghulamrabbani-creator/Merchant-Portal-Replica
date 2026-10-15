@@ -221,7 +221,6 @@ export type DDContractStatus =
   | "Pending Bank Approval" // APRP
   | "Active" // ACCP
   | "Rejected" // RJCT
-  | "Denied" // DENY
   | "Request Expired" // RQXP
   | "Error" // ERR — final
   | "Cancelled" // CANC (or Geidea closure when closureReasonCode is set)
@@ -326,6 +325,11 @@ export interface DirectDebitOccurrence {
   paymentStatus?: "RPND";
   /** Occurrence.skip_reason — only set when status is Skipped. */
   skipReason?: DDSkipReason;
+  /** Payment.payment_seq (15-Oct-2026): the 6-digit number in the payment reference. Absent = the
+   *  collection's own seq. A collection re-set after an Error gets the next unused number. */
+  paymentSeq?: number;
+  /** Earlier payment attempts that ended in Error (kept for history; DDS can't represent ERR). */
+  errorHistory?: { paymentRef: string; dueDate: string; message: string }[];
   /** Occurrence.original_amount — the amount as first scheduled; never changes (S2 §4a). */
   originalAmount?: number;
   /** Occurrence.amount_source (S2 §4b). */
@@ -421,7 +425,7 @@ export interface DirectDebitContract {
    *  reference); "unknown" = no answer from DDS (contact support). */
   notSubmittedKind?: "rejected" | "unknown";
   notSubmittedReason?: string;
-  /** Mandate reason label for DD Rejected / Denied / Error (e.g. RR05 "Account name doesn't match"). */
+  /** Mandate reason label for DD Rejected / Error (e.g. RR05 "Account name doesn't match"). */
   mandateReason?: string;
   /** Activity history (US-32), newest first. */
   activity?: DDActivityEvent[];
