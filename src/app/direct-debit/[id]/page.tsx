@@ -20,6 +20,9 @@ import {
   FileJson,
   CheckCircle2,
   Loader2,
+  Ban,
+  FileText,
+  AlertTriangle,
 } from "lucide-react";
 import clsx from "clsx";
 import {
@@ -34,6 +37,10 @@ import {
   paymentRef,
   centralBankRef,
   formatInstrumentRef,
+  DD_CANCEL_REASONS,
+  cancelReasonLabel,
+  isCancellationPending,
+  isCancellationSigned,
 } from "@/lib/direct-debit";
 import { useContract } from "@/lib/dd-contract-store";
 import {
@@ -45,6 +52,13 @@ import {
   resendBlockedReason as resendWhy,
   resendSigningLink,
   useContractsVersion,
+  cancelBlockedReason,
+  cancelResendBlockedReason,
+  requestCancellation,
+  resendCancellationLink,
+  cancellationSigned,
+  cancellationDecided,
+  setSubscriptionPaused,
 } from "@/lib/dd-actions";
 import { useDDConfig } from "@/lib/dd-config-context";
 import { HintKey } from "@/lib/dd-field-map";
@@ -61,6 +75,10 @@ import { DDSubscriptionStatus, DirectDebitContract, DirectDebitOccurrence } from
 // (US-17/US-33) and activity history (US-32) added; every action is gated by status AND the role's
 // permissions (US-02 — role switcher in the top bar). Failed = Failed only; Outstanding excludes
 // rolled-over amounts.
+// 15-Oct-2026 (Confluence S8; US-21 / US-40): Cancel contract is back, permission-controlled
+// (Cancel Contract), with DDS's reason codes, a note that collections continue until the customer
+// signs, an optional pause, a cancellation panel (resend link, forms) and prototype controls to
+// simulate the customer signing and the bank's decision.
 
 function Field({ label, value, hint }: { label: React.ReactNode; value: React.ReactNode; hint?: HintKey }) {
   return (
@@ -121,6 +139,11 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
   const [amendNotice, setAmendNotice] = useState<string | null>(null);
   const [resendNotice, setResendNotice] = useState<string | null>(null);
   const resendCount = c.signingNotificationCount ?? 0;
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelComments, setCancelComments] = useState("");
+  const [cancelPause, setCancelPause] = useState(false);
+  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
 
   const summary = useMemo(() => {
     const paid = occurrences.filter((o) => o.status === "Paid");
@@ -148,6 +171,12 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
   }
   const resendBlockedReason = resendWhy(c, can("manageUnsigned"));
   const discardWhy = discardBlockedReason(c, can("manageUnsigned"));
+  const cancelWhy = cancelBlockedReason(c, can("cancel"));
+  const cx = c.cancellation;
+  const cxPending = isCancellationPending(c);
+  const cxSigned = isCancellationSigned(c);
+  const cxResendWhy = cxPending ? cancelResendBlockedReason(c, can("cancel")) : null;
+  const cancelValid = !!cancelReason && (cancelReason !== "P99" || cancelComments.trim().length > 0);
 
   return (
     <div>
@@ -223,13 +252,15 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
                   setAmendNotice(null);
                   setAmendOpen(true);
                 }}
-                disabled={!can("amend") || !canAmendAny}
+                disabled={!can("amend") || !canAmendAny || cxSigned}
                 title={
                   !can("amend")
                     ? "Your role doesn't include the Amend Collection permission."
+                    : cxSigned
+                      ? "The customer has signed the cancellation — no changes while the bank decides."
                     : !canAmendAny
                       ? "No upcoming Scheduled collection, or collection in Error, that can still be changed."
-                      : "Change the date or amount of upcoming collections"
+                        : "Change the date or amount of upcoming collections"
                 }
                 className="flex items-center gap-2 rounded-lg border border-border-color bg-white px-4 py-2.5 text-sm font-medium text-text-primary hover:border-text-muted disabled:cursor-not-allowed disabled:text-text-muted"
                 data-testid="amend-open"
@@ -245,7 +276,7 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
               {subscriptionStatus === "Active" ? (
                 <button
                   onClick={() => setPauseModalOpen(true)}
-                  disabled={!can("pauseResume")}
+                  disabled={!can("pauseResume") || cxSigned}
                   title={can("pauseResume") ? undefined : "Your role doesn't include the Pause / Resume permission."}
                   className="flex items-center gap-2 rounded-lg border border-border-color bg-white px-4 py-2.5 text-sm font-medium text-text-primary hover:border-text-muted disabled:cursor-not-allowed disabled:text-text-muted"
                 >
@@ -256,9 +287,9 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
                 <button
                   onClick={() => {
                     setSubscriptionStatus("Active");
-                    logActivity(c.id, "Merchant user", "Collections resumed");
+                    setSubscriptionPaused(c.id, false, "Collections resumed");
                   }}
-                  disabled={!can("pauseResume")}
+                  disabled={!can("pauseResume") || cxSigned}
                   title={can("pauseResume") ? undefined : "Your role doesn't include the Pause / Resume permission."}
                   className="flex items-center gap-2 rounded-lg border border-brand-blue px-4 py-2.5 text-sm font-medium text-brand-blue disabled:cursor-not-allowed disabled:border-border-color disabled:text-text-muted"
                 >
@@ -267,6 +298,26 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
                 </button>
               )}
               <FieldHint k={subscriptionStatus === "Active" ? "act.pause" : "act.resume"} />
+            </span>
+          )}
+          {/* US-21: permission-controlled — hidden for users without Cancel Contract. */}
+          {can("cancel") && c.status === "Active" && !cxPending && (
+            <span className="inline-flex items-center gap-1">
+              <button
+                onClick={() => {
+                  setCancelReason("");
+                  setCancelComments("");
+                  setCancelPause(false);
+                  setCancelOpen(true);
+                }}
+                disabled={!!cancelWhy}
+                title={cancelWhy ?? "Cancel the direct debit — the customer signs the cancellation with UAE PASS"}
+                className="flex items-center gap-2 rounded-lg border border-status-declined px-4 py-2.5 text-sm font-medium text-status-declined disabled:cursor-not-allowed disabled:border-border-color disabled:text-text-muted"
+                data-testid="cancel-open"
+              >
+                <Ban size={15} />
+                Cancel contract
+              </button>
             </span>
           )}
           <a
@@ -296,6 +347,115 @@ Customer: ${c.customerName}`)}`}
         <div className="mb-5 flex items-start gap-2 rounded-lg border border-status-completed/50 bg-status-completed/10 px-4 py-2.5 text-sm text-text-primary" data-testid="amend-notice">
           <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-status-completed" />
           {amendNotice}
+        </div>
+      )}
+
+      {cancelNotice && (
+        <div className="mb-5 flex items-start gap-2 rounded-lg border border-status-completed/50 bg-status-completed/10 px-4 py-2.5 text-sm text-text-primary" data-testid="cancel-notice">
+          <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-status-completed" />
+          {cancelNotice}
+        </div>
+      )}
+
+      {cx && (cxPending || cx.stage === "rejected") && (
+        <div
+          className={clsx(
+            "mb-5 rounded-lg border px-4 py-3 text-sm text-text-primary",
+            cx.stage === "rejected" ? "border-status-declined/60 bg-status-declined/5" : "border-status-pending bg-status-pending/10"
+          )}
+          data-testid="cancellation-panel"
+        >
+          <div className="mb-1 flex flex-wrap items-center gap-2 font-semibold">
+            <Ban size={15} />
+            {cx.stage === "awaiting_customer" && "Cancellation pending — awaiting customer signature"}
+            {cx.stage === "with_bank" && "Cancellation pending — with the bank"}
+            {cx.stage === "rejected" && "Cancellation rejected by the bank"}
+          </div>
+          <div className="text-[13px] text-text-secondary">
+            Reason: {cancelReasonLabel(cx.reasonCode)} ({cx.reasonCode}){cx.comments ? ` — ${cx.comments}` : ""} · Requested by {cx.requestedBy}, {cx.requestedAt}
+            {cx.pausedByCancellation ? " · collections paused at the same time" : ""}
+            {cx.signedAt ? ` · signed by the customer ${cx.signedAt}` : ""}
+            {cx.stage === "rejected" && cx.rejectReason ? ` · ${cx.rejectReason}` : ""}
+          </div>
+          {cx.stage === "awaiting_customer" && (
+            <div className="mt-1.5 text-[13px]">
+              {subscriptionStatus === "Paused" ? (
+                <b>Collections are paused.</b>
+              ) : (
+                <>
+                  <b>Collections continue until the customer signs.</b> To stop them now, pause the subscription.
+                </>
+              )}{" "}
+              Link sent {cx.notificationCount}× (max {MAX_RESENDS} resends) · valid until {cx.linkExpiresAt}. A cancellation request can&apos;t be withdrawn.
+            </div>
+          )}
+          {cx.stage === "with_bank" && (
+            <div className="mt-1.5 text-[13px]">
+              The customer signed the cancellation. No collections are sent while the bank decides (up to 1 working day); Pause / Resume, Amend and Retry are disabled.
+            </div>
+          )}
+          {cx.stage === "rejected" && (
+            <div className="mt-1.5 text-[13px]">The contract is DD Active again and collections resume{subscriptionStatus === "Paused" ? " once you resume the subscription" : ""}. Collections skipped meanwhile can be recovered with Amend schedule.</div>
+          )}
+          {cxPending && (
+            <div className="mt-2.5 flex flex-wrap items-center gap-2.5">
+              {cx.stage === "awaiting_customer" && (
+                <>
+                  <a
+                    href={`/contracts/cancel/${c.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 rounded-lg border border-border-color bg-white px-3 py-1.5 text-[13px] font-medium"
+                  >
+                    <ExternalLink size={13} /> Open customer cancellation page
+                  </a>
+                  <button
+                    onClick={() => setCancelNotice(resendCancellationLink(c.id, config.contractReviewExpiryDays))}
+                    disabled={!!cxResendWhy}
+                    title={cxResendWhy ?? "Send the cancellation link to the customer again"}
+                    className="flex items-center gap-1.5 rounded-lg border border-brand-blue bg-white px-3 py-1.5 text-[13px] font-medium text-brand-blue disabled:cursor-not-allowed disabled:border-border-color disabled:text-text-muted"
+                    data-testid="cancel-resend"
+                  >
+                    <Send size={13} /> Resend cancellation link
+                  </button>
+                </>
+              )}
+              <a
+                href={`data:text/plain;charset=utf-8,${encodeURIComponent(`${cx.stage === "with_bank" ? "SIGNED" : "UNSIGNED"} CANCELLATION FORM (prototype)\nMerchant reference: ${c.merchantRef}\nDDS cancellation request: ${cx.ddcaId}\nReason: ${cx.reasonCode}`)}`}
+                download={`${c.merchantRef}-cancellation-${cx.stage === "with_bank" ? "signed" : "unsigned"}.txt`}
+                className="flex items-center gap-1.5 rounded-lg border border-border-color bg-white px-3 py-1.5 text-[13px] font-medium"
+              >
+                <FileText size={13} /> {cx.stage === "with_bank" ? "Signed" : "Unsigned"} cancellation form
+              </a>
+              <span className="flex flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-fuchsia-400 px-2.5 py-1 text-[12px] text-fuchsia-700">
+                Prototype:
+                {cx.stage === "awaiting_customer" && (
+                  <button onClick={() => cancellationSigned(c.id)} className="underline" data-testid="sim-cx-signed">
+                    customer signs
+                  </button>
+                )}
+                {cx.stage === "with_bank" && (
+                  <>
+                    <button
+                      onClick={() => {
+                        cancellationDecided(c.id, true);
+                        setSubscriptionStatus("Cancelled");
+                        setOccurrences((prev) => prev.map((o) => (o.status === "Scheduled" ? { ...o, status: "Cancelled" } : o)));
+                      }}
+                      className="underline"
+                      data-testid="sim-cx-accept"
+                    >
+                      bank accepts (18:15 check)
+                    </button>
+                    ·
+                    <button onClick={() => cancellationDecided(c.id, false)} className="underline" data-testid="sim-cx-reject">
+                      bank rejects
+                    </button>
+                  </>
+                )}
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -464,7 +624,7 @@ Customer: ${c.customerName}`)}`}
               occurrences={occurrences}
               subscriptionStatus={subscriptionStatus}
               onRetry={(seq) => setOccurrences((prev) => applyRetrySubmitted(prev, seq))}
-              onAmend={c.status === "Active" ? () => { setAmendNotice(null); setAmendOpen(true); } : undefined}
+              onAmend={c.status === "Active" && !cxSigned ? () => { setAmendNotice(null); setAmendOpen(true); } : undefined}
               onSimulate={(seq, r) => setOccurrences((prev) => applyRetryResult(c, prev, seq, r))}
             />
           </div>
@@ -518,6 +678,74 @@ Customer: ${c.customerName}`)}`}
         />
       )}
 
+      <Modal open={cancelOpen} onClose={() => setCancelOpen(false)}>
+        <div className="p-8" data-testid="cancel-dialog">
+          <h2 className="mb-2 text-xl font-bold text-text-primary">Cancel contract {c.merchantRef}?</h2>
+          <p className="mb-4 text-sm text-text-secondary">
+            Geidea sends {c.customerName} a link to sign the cancellation with UAE PASS. Once their bank accepts it (up to 1
+            working day after signing), the contract is DD Cancelled and no further payments are collected. History and
+            documents are kept.
+          </p>
+          <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">Reason *</label>
+          <select
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            className="mb-3 w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
+            data-testid="cancel-reason"
+          >
+            <option value="">Select a reason</option>
+            {DD_CANCEL_REASONS.map((r) => (
+              <option key={r.code} value={r.code}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+          <label className="mb-1.5 block text-[12.5px] font-semibold text-text-primary">Comments{cancelReason === "P99" ? " *" : " (optional)"}</label>
+          <textarea
+            value={cancelComments}
+            maxLength={1000}
+            rows={2}
+            onChange={(e) => setCancelComments(e.target.value)}
+            className="mb-4 w-full rounded-lg border border-border-color px-3 py-2 text-sm outline-none"
+            data-testid="cancel-comments"
+          />
+          <div className="mb-3 rounded-lg border border-status-pending bg-status-pending/10 px-3.5 py-2.5 text-[13px] text-text-primary" data-testid="cancel-note">
+            <b>Note:</b> Until the customer accepts the cancellation, payment collection will continue. If you want collections to stop now, pause the subscription.
+          </div>
+          {subscriptionStatus === "Active" && can("pauseResume") && (
+            <label className="mb-3 flex items-center gap-2 text-sm text-text-primary">
+              <input type="checkbox" checked={cancelPause} onChange={(e) => setCancelPause(e.target.checked)} data-testid="cancel-pause" />
+              Also pause collections now
+            </label>
+          )}
+          {subscriptionStatus === "Paused" && (
+            <div className="mb-3 text-[13px] text-text-secondary">Collections are already paused and stay paused.</div>
+          )}
+          <div className="mb-6 flex items-start gap-2 text-[13px] text-status-declined">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+            A cancellation request can&apos;t be withdrawn. The customer must sign it with UAE PASS before the bank cancels the direct debit.
+          </div>
+          <div className="flex justify-end gap-3">
+            <button onClick={() => setCancelOpen(false)} className="rounded-lg border border-border-color px-5 py-2.5 text-sm font-medium">
+              Keep contract
+            </button>
+            <button
+              disabled={!cancelValid}
+              onClick={() => {
+                const pause = cancelPause && subscriptionStatus === "Active";
+                setCancelNotice(requestCancellation(c.id, cancelReason, cancelComments.trim(), pause, config.contractReviewExpiryDays));
+                if (pause) setSubscriptionStatus("Paused");
+                setCancelOpen(false);
+              }}
+              className="rounded-lg bg-status-declined px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid="cancel-confirm"
+            >
+              Send cancellation request
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       <Modal open={pauseModalOpen} onClose={() => setPauseModalOpen(false)}>
         <div className="p-8">
           <h2 className="mb-2 text-xl font-bold text-text-primary">Pause collections?</h2>
@@ -540,7 +768,7 @@ Customer: ${c.customerName}`)}`}
             <button
               onClick={() => {
                 setSubscriptionStatus("Paused");
-                logActivity(c.id, "Merchant user", `Collections paused${pauseReason.trim() ? ` — ${pauseReason.trim()}` : ""}`);
+                setSubscriptionPaused(c.id, true, `Collections paused${pauseReason.trim() ? ` — ${pauseReason.trim()}` : ""}`);
                 setPauseReason("");
                 setPauseModalOpen(false);
               }}

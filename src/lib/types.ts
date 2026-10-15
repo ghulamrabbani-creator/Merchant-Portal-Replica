@@ -279,7 +279,7 @@ export type DDOccurrenceStatus =
   | "Error";
 
 /** Occurrence.skip_reason (S5 check C3/C6, S7 §1). */
-export type DDSkipReason = "paused" | "min_gap" | "not_active_in_time" | "missed_submission";
+export type DDSkipReason = "paused" | "min_gap" | "not_active_in_time" | "missed_submission" | "cancellation_signed";
 
 /** Per-occurrence flag, independent of `status` — status says WHY an occurrence didn't happen
  *  as originally due (Failed vs Skipped), rolledOver says WHETHER its amount got folded onto a
@@ -429,6 +429,29 @@ export interface DirectDebitContract {
   mandateReason?: string;
   /** Activity history (US-32), newest first. */
   activity?: DDActivityEvent[];
+  // ---- Added 15-Oct-2026 (Confluence S8, MP Backlog US-21 / US-40 / US-41) ----
+  /** The contract's cancellation request, if one was ever started (one pending at a time). */
+  cancellation?: DDCancellation;
+}
+
+/** Cancellation Request (S8 §1). awaiting_customer → with_bank → accepted | rejected. */
+export type DDCancellationStage = "awaiting_customer" | "with_bank" | "accepted" | "rejected";
+
+export interface DDCancellation {
+  cancellationId: string;
+  ddcaId: number; // DDS cancellation request ID — forms and status
+  ddcarId: number; // DDS cancellation signing request ID — UAE PASS ddarId
+  reasonCode: string; // DDS P-code
+  comments?: string;
+  requestedBy: string;
+  requestedAt: string;
+  stage: DDCancellationStage;
+  pausedByCancellation: boolean;
+  linkExpiresAt: string;
+  notificationCount: number; // 1 = first send
+  signedAt?: string;
+  decidedAt?: string;
+  rejectReason?: string;
 }
 
 export interface DDActivityEvent {

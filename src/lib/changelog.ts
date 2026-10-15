@@ -30,6 +30,11 @@ export const CHANGELOG: ChangelogEntry[] = [
   {
     date: "15 Oct 2026",
     description:
+      "Direct Debit contract cancellation (in the MVP — Confluence S8; MP Backlog US-21, US-40, US-41): \"Cancel contract\" on DD Active contracts, shown only to roles with the new Cancel Contract permission. The dialog takes a DDS reason code (comments for Other), notes that collections continue until the customer accepts the cancellation and that pausing stops them, and offers \"Also pause collections now\". New status Cancellation Pending (awaiting customer signature / with the bank) with resend link, cancellation forms and a customer signing page at /contracts/cancel/{id}. Once signed, Pause/Resume, Amend and Retry are disabled; prototype buttons simulate the bank accepting (DD Cancelled) or rejecting (back to DD Active).",
+  },
+  {
+    date: "15 Oct 2026",
+    description:
       "Direct Debit aligned to DDS's answers of 15-Oct-2026 (MP Backlog v2.2, Confluence v2.5). (1) A collection in Error is no longer retried (DDS represents rejected payments only): it shows \"Payment validation error\", has no Retry and no bounce memo, and is re-set with Amend schedule — it becomes Scheduled again with a new payment reference (next unused number, e.g. …-000013); the earlier attempt stays in its history. Try it on \"Error Collection\". (2) DD Denied removed (banks don't support DENY); Declined = Rejected + Error. (3) Geidea reference code: a 5-digit code (48213 in the prototype) sits in front of every merchant reference; the merchant types up to 20 characters; shown read-only in PGW Config. (4) Collection rows show their payment reference once sent. (5) Customer signing outcomes follow DDS's UAE PASS Signature API v1.4 (finished / failed with the exact IBAN message / canceled / ddsError).",
   },
   {

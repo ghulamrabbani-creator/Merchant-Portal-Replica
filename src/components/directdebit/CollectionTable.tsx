@@ -43,6 +43,7 @@ import { DDSubscriptionStatus, DirectDebitContract, DirectDebitOccurrence } from
 
 const SKIP_REASON_TEXT: Record<string, string> = {
   paused: "Subscription paused — not sent for collection.",
+  cancellation_signed: "Customer signed the cancellation — not sent while the bank decides.",
   min_gap: "Too close to the previous debit (DDS minimum gap) — amount rolled automatically.",
   not_active_in_time: "Mandate wasn't Active in time for this collection.",
   missed_submission: "Missed the payment file submission.",

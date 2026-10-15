@@ -17,7 +17,7 @@ import FieldHint from "@/components/directdebit/FieldHint";
 import { useDDConfig } from "@/lib/dd-config-context";
 import { useAllContracts, useHydrated } from "@/lib/dd-contract-store";
 import { HintKey } from "@/lib/dd-field-map";
-import { applyRetryResult, applyRetrySubmitted, contractStatusLabel, formatMoneyAED } from "@/lib/direct-debit";
+import { applyRetryResult, applyRetrySubmitted, contractStatusLabel, formatMoneyAED, isCancellationPending, statusFilterKey } from "@/lib/direct-debit";
 import { DD_STORES } from "@/lib/mock-data";
 import { discardBlockedReason, discardContract, resendBlockedReason, resendSigningLink, useContractsVersion } from "@/lib/dd-actions";
 import { DirectDebitContract, DirectDebitOccurrence } from "@/lib/types";
@@ -48,7 +48,7 @@ function computeKpis(list: DirectDebitContract[]) {
   const failed = failedByContract.flat();
   const declined = list.filter((c) => c.status === "Rejected" || c.status === "Error");
   return {
-    active: { n: active.length, value: sumAmt(active.map((c) => ({ amount: c.maxAmount }))) },
+    active: { n: active.length, value: sumAmt(active.map((c) => ({ amount: c.maxAmount }))), cancelling: active.filter((c) => isCancellationPending(c)).length },
     pendingSign: { n: pendingSign.length, awaiting: pendingSign.filter((c) => c.status === "Awaiting Customer Details").length },
     pendingBank: { n: pendingBank.length },
     paid: { n: paid.length, amount: sumAmt(paid) },
@@ -103,7 +103,7 @@ export default function DirectDebitPage() {
       contracts.filter(
         (c) =>
           (!c.storeId || stores.includes(c.storeId)) &&
-          (filters.statuses.length === 0 || filters.statuses.includes(c.status)) &&
+          (filters.statuses.length === 0 || filters.statuses.includes(c.status) || filters.statuses.includes(statusFilterKey(c))) &&
           (filters.frequencies.length === 0 || filters.frequencies.includes(c.frequency)) &&
           (filters.instruments.length === 0 || (c.instrumentType && filters.instruments.includes(c.instrumentType)))
       ),
@@ -218,7 +218,7 @@ export default function DirectDebitPage() {
       {/* US-03: hidden while a search is active; computed from the stores and filters in view. */}
       {hydrated && !searching && (
         <div className="mb-5 flex gap-3" data-testid="dd-kpis">
-          <StatCard label="DD Active" value={String(kpi.active.n)} sub={`Max contract value: ${formatMoneyAED(kpi.active.value)}`} />
+          <StatCard label="DD Active" value={String(kpi.active.n)} sub={`Max contract value: ${formatMoneyAED(kpi.active.value)}${kpi.active.cancelling ? ` · incl. ${kpi.active.cancelling} cancellation pending` : ""}`} />
           <StatCard label="Pending Customer Sign" value={String(kpi.pendingSign.n)} sub={`${kpi.pendingSign.awaiting} awaiting customer details`} />
           <StatCard label="Pending Bank Approval" value={String(kpi.pendingBank.n)} sub="Submitted or approved by the paying bank" />
           <StatCard label="Total Collections" value={String(kpi.paid.n)} sub={`${formatMoneyAED(kpi.paid.amount)} collected (Paid only)`} />

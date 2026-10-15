@@ -52,10 +52,56 @@ export function persistIfCreated(c: DirectDebitContract) {
 function hydrateFromStorage() {
   const stored = Object.values(readAll());
   const missing = stored.filter((c) => !directDebitContracts.some((x) => x.id === c.id));
-  if (missing.length === 0) return;
+  if (missing.length === 0) {
+    applyCancellationOverlays();
+    return;
+  }
   // newest first, matching unshift() on create
   missing.sort((a, b) => b.id.localeCompare(a.id));
   directDebitContracts.unshift(...missing);
+  applyCancellationOverlays();
+}
+
+
+// ---- Cancellation overlay (15-Oct-2026, S8 / US-40 / US-41) ----
+// The customer's cancellation page opens in a NEW TAB, which starts with fresh memory — so the
+// cancellation (and what it changes on the contract) is written to this browser for EVERY
+// contract, demo records included, and applied on lookup. Newer writes win (`v`).
+const CX_KEY = "mpr:dd-cancellations:v1";
+type CxOverlay = Pick<DirectDebitContract, "cancellation" | "status" | "subscriptionStatus" | "statusNote" | "occurrences" | "activity"> & { v: number };
+const appliedV: Record<string, number> = {};
+
+function readCx(): Record<string, CxOverlay> {
+  try {
+    const raw = window.localStorage.getItem(CX_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, CxOverlay>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Save the contract's cancellation state (any contract). */
+export function saveCancellationOverlay(c: DirectDebitContract) {
+  try {
+    const all = readCx();
+    const v = Date.now();
+    all[c.id] = { cancellation: c.cancellation, status: c.status, subscriptionStatus: c.subscriptionStatus, statusNote: c.statusNote, occurrences: c.occurrences, activity: c.activity, v };
+    appliedV[c.id] = v;
+    window.localStorage.setItem(CX_KEY, JSON.stringify(all));
+  } catch {
+    /* storage unavailable — this tab still works */
+  }
+}
+
+export function applyCancellationOverlays() {
+  const all = readCx();
+  for (const [id, o] of Object.entries(all)) {
+    if ((appliedV[id] ?? 0) >= o.v) continue;
+    const c = directDebitContracts.find((x) => x.id === id);
+    if (!c) continue;
+    Object.assign(c, { cancellation: o.cancellation, status: o.status, subscriptionStatus: o.subscriptionStatus, statusNote: o.statusNote, occurrences: o.occurrences, activity: o.activity });
+    appliedV[id] = o.v;
+  }
 }
 
 const noopSubscribe = () => () => {};

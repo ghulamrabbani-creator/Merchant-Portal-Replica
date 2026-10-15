@@ -9,11 +9,11 @@ import { SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
 import Modal from "@/components/ui/Modal";
-import { DD_STATUS_FILTER } from "@/lib/direct-debit";
-import { DD_FREQUENCIES, DDContractStatus, DDFrequency, DDInstrumentType } from "@/lib/types";
+import { DD_STATUS_FILTER, DDStatusFilterKey } from "@/lib/direct-debit";
+import { DD_FREQUENCIES, DDFrequency, DDInstrumentType } from "@/lib/types";
 
 export interface DDListFilters {
-  statuses: DDContractStatus[];
+  statuses: DDStatusFilterKey[];
   frequencies: DDFrequency[];
   instruments: DDInstrumentType[];
 }
@@ -24,7 +24,7 @@ const INSTRUMENTS: DDInstrumentType[] = ["Bank Account", "Credit Card"];
 
 function dotFor(label: string) {
   if (label === "DD Active") return "bg-status-approved";
-  if (label.startsWith("DD Pending") || label === "Awaiting Customer Details") return "bg-status-pending";
+  if (label.startsWith("DD Pending") || label === "Awaiting Customer Details" || label === "Cancellation Pending") return "bg-status-pending";
   if (label === "Discarded") return "bg-status-submitted";
   return "bg-status-declined";
 }

@@ -222,14 +222,15 @@ export type DDPermission =
   | "pauseResume"
   | "amend"
   | "retry"
+  | "cancel" // Cancel Contract — start a cancellation, resend its link (15-Oct-2026, S8 / US-21)
   | "bulkMaker"
   | "bulkChecker";
 
 export type DDRole = "admin" | "operator" | "viewer" | "maker" | "checker";
 
 export const DD_ROLES: { role: DDRole; label: string; perms: DDPermission[] }[] = [
-  { role: "admin", label: "Business admin (all permissions)", perms: ["view", "export", "create", "manageUnsigned", "pauseResume", "amend", "retry", "bulkMaker", "bulkChecker"] },
-  { role: "operator", label: "Operator", perms: ["view", "export", "create", "manageUnsigned", "pauseResume", "amend", "retry"] },
+  { role: "admin", label: "Business admin (all permissions)", perms: ["view", "export", "create", "manageUnsigned", "pauseResume", "amend", "retry", "cancel", "bulkMaker", "bulkChecker"] },
+  { role: "operator", label: "Operator", perms: ["view", "export", "create", "manageUnsigned", "pauseResume", "amend", "retry", "cancel"] },
   { role: "viewer", label: "Viewer (view only)", perms: ["view"] },
   { role: "maker", label: "Bulk maker", perms: ["view", "bulkMaker"] },
   { role: "checker", label: "Bulk checker", perms: ["view", "bulkChecker"] },
@@ -243,6 +244,7 @@ export const DD_PERMISSION_LABEL: Record<DDPermission, string> = {
   pauseResume: "Pause / Resume Subscription",
   amend: "Amend Collection",
   retry: "Retry Collection",
+  cancel: "Cancel Contract",
   bulkMaker: "Bulk Upload Maker",
   bulkChecker: "Bulk Upload Checker",
 };

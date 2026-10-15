@@ -1,4 +1,4 @@
-import { DD_FREQUENCIES, DDActivityEvent, DDAmountType, DDContractStatus, DDFrequency, DDSubscriptionStatus, DirectDebitContract, DirectDebitOccurrence } from "./types";
+import { DD_FREQUENCIES, DDActivityEvent, DDAmountType, DDCancellation, DDContractStatus, DDFrequency, DDSubscriptionStatus, DirectDebitContract, DirectDebitOccurrence } from "./types";
 
 // Ported from the Direct Debit Contracts design canvas (Create Contracts & Subscription flow).
 // Central Bank rule: no more than one collection per the mandate's own payment_frequency period —
@@ -359,13 +359,50 @@ const DD_LABEL: Record<DDContractStatus, string> = {
 };
 
 /** The merchant-facing label: "DD Active", "Awaiting Customer Details", "Cancelled — Account closed"… */
-export function contractStatusLabel(c: Pick<DirectDebitContract, "status" | "closureReasonCode">): string {
+export function contractStatusLabel(c: Pick<DirectDebitContract, "status" | "closureReasonCode"> & { cancellation?: DDCancellation }): string {
   if (c.status === "Cancelled" && c.closureReasonCode) return `Cancelled — ${reasonLabel(c.closureReasonCode)}`;
+  if (isCancellationPending(c)) return "Cancellation Pending";
   return DD_LABEL[c.status] ?? c.status;
 }
 
+// ---- Contract cancellation (15-Oct-2026 — Confluence S8, US-21 / US-40 / US-41) ----
+/** DDS cancellation reason codes (DDS REST API v2.0). P99 needs comments. */
+export const DD_CANCEL_REASONS: { code: string; label: string }[] = [
+  { code: "P50", label: "Account closed or closing" },
+  { code: "P30", label: "Card cancelled" },
+  { code: "P31", label: "Card expired" },
+  { code: "P32", label: "Card replaced" },
+  { code: "P33", label: "Card lost, destroyed or damaged" },
+  { code: "P20", label: "Moving service providers" },
+  { code: "P10", label: "Unreliable billing from the originator" },
+  { code: "P11", label: "Unreliable dispute resolution" },
+  { code: "P12", label: "Unfair dispute resolution" },
+  { code: "P01", label: "Loan settled" },
+  { code: "P02", label: "Loan topped up" },
+  { code: "P03", label: "Alternate DDA set up – loan buyout" },
+  { code: "P04", label: "Alternate DDA set up – loan rescheduled" },
+  { code: "P99", label: "Other" },
+];
+export function cancelReasonLabel(code: string): string {
+  return DD_CANCEL_REASONS.find((r) => r.code === code)?.label ?? code;
+}
+/** A cancellation request is open on an Active mandate (status stays DD Active / ACCP). */
+export function isCancellationPending(c: { status: DDContractStatus; cancellation?: DDCancellation }): boolean {
+  return c.status === "Active" && !!c.cancellation && (c.cancellation.stage === "awaiting_customer" || c.cancellation.stage === "with_bank");
+}
+/** Once the customer has signed, collections stop until the bank decides (S8 rule 3). */
+export function isCancellationSigned(c: { status: DDContractStatus; cancellation?: DDCancellation }): boolean {
+  return c.status === "Active" && c.cancellation?.stage === "with_bank";
+}
+
+export type DDStatusFilterKey = DDContractStatus | "Cancellation Pending";
+/** Filter key for a contract — Cancellation Pending is its own option (US-40). */
+export function statusFilterKey(c: { status: DDContractStatus; cancellation?: DDCancellation }): DDStatusFilterKey {
+  return isCancellationPending(c) ? "Cancellation Pending" : c.status;
+}
+
 /** Filter options, in lifecycle order (US-05). */
-export const DD_STATUS_FILTER: { status: DDContractStatus; label: string }[] = (
+export const DD_STATUS_FILTER: { status: DDStatusFilterKey; label: string }[] = (
   [
     "Awaiting Customer Details",
     "Not Submitted",
@@ -373,6 +410,7 @@ export const DD_STATUS_FILTER: { status: DDContractStatus; label: string }[] = (
     "Pending System Submission",
     "Pending Bank Approval",
     "Active",
+    "Cancellation Pending",
     "Rejected",
     "Request Expired",
     "Error",
@@ -380,8 +418,8 @@ export const DD_STATUS_FILTER: { status: DDContractStatus; label: string }[] = (
     "Discarded",
     "Cancelled",
     "Expired",
-  ] as DDContractStatus[]
-).map((status) => ({ status, label: DD_LABEL[status] }));
+  ] as DDStatusFilterKey[]
+).map((status) => ({ status, label: status === "Cancellation Pending" ? "Cancellation Pending" : DD_LABEL[status] }));
 
 /** Statuses where the customer hasn't signed yet — Resend and Discard apply (US-15, US-34). */
 export function isUnsigned(status: DDContractStatus): boolean {
@@ -408,6 +446,12 @@ export function resendLinkExpiry(createdOn: string, status: DDContractStatus, re
     }
   }
   return `${formatDateNice(exp)}, 11:59 PM`;
+}
+
+/** Cancellation link (S8 §2): end of day, today + contract_review_expiry_days. No DDS cap — the
+ *  DDS cancellation request never expires, so it can be resent after the link has expired. */
+export function cancellationLinkExpiry(reviewExpiryDays = 7, today: Date = ddToday()): string {
+  return `${formatDateNice(addDays(today, reviewExpiryDays))}, 11:59 PM`;
 }
 
 /** True once the review link's last day has passed (US-15: resend refused, link refused). */
@@ -547,6 +591,7 @@ export function retryDeadline(
 
 export type RetryBlockedReason =
   | "ACTION_NOT_ALLOWED"
+  | "CANCELLATION_SIGNED"
   | "NOT_RETRYABLE"
   | "TERMINAL_REASON"
   | "RETRY_IN_PROGRESS"
@@ -558,7 +603,7 @@ export type RetryBlockedReason =
 /** S6 §1.1 — every check the Backend runs before accepting a retry, in the same order, so the
  *  portal can disable the button with the matching reason instead of letting it fail. */
 export function retryEligibility(
-  contract: Pick<DirectDebitContract, "status" | "frequency" | "expiresOn">,
+  contract: Pick<DirectDebitContract, "status" | "frequency" | "expiresOn" | "cancellation">,
   subscriptionStatus: DDSubscriptionStatus,
   occurrences: DirectDebitOccurrence[],
   o: DirectDebitOccurrence,
@@ -575,6 +620,7 @@ export function retryEligibility(
   if (deadline && diffDays(today, deadline) < 0) return { allowed: false, reason: "RETRY_WINDOW_CLOSED", deadline };
   if (contract.status !== "Active") return { allowed: false, reason: "CONTRACT_NOT_ACTIVE", deadline };
   if (subscriptionStatus === "Paused") return { allowed: false, reason: "SUBSCRIPTION_PAUSED", deadline };
+  if (isCancellationSigned(contract)) return { allowed: false, reason: "CANCELLATION_SIGNED", deadline };
   return { allowed: true, deadline };
 }
 
@@ -584,6 +630,7 @@ export const RETRY_BLOCKED_TEXT: Record<RetryBlockedReason, string> = {
   TERMINAL_REASON: "Terminal refusal reason — a retry cannot help. The contract has been closed.",
   RETRY_IN_PROGRESS: "A retry is already with DDS (Representment Pending).",
   RETRIES_EXHAUSTED: `All ${RETRY_CAP} retries have been used.`,
+  CANCELLATION_SIGNED: "The customer has signed a cancellation — no collection is sent while the bank decides.",
   RETRY_WINDOW_CLOSED: "The retry deadline has passed — a later retry could break DDS's minimum gap before the next collection.",
   CONTRACT_NOT_ACTIVE: "The contract is not Active.",
   SUBSCRIPTION_PAUSED: "The subscription is paused — resume it first.",

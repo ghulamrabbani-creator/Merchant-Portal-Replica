@@ -35,6 +35,7 @@ const colorMap: Record<string, string> = {
   "Representment Pending": "bg-status-pending",
   // Direct Debit one status list (14-Oct-2026): DD-tagged DDS statuses + Geidea-only statuses.
   "DD Active": "bg-status-approved",
+  "Cancellation Pending": "bg-status-pending",
   "DD Pending": "bg-status-pending",
   "DD Pending System Submission": "bg-status-pending",
   "DD Pending Bank Approval": "bg-status-pending",
