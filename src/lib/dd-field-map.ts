@@ -29,6 +29,8 @@ export interface FieldHintDef {
   direction: HintDirection;
   endpoint?: string;
   lines: HintLine[];
+  /** Display criteria — what is counted and how (used by the KPI cards, US-03 / US-03.1). */
+  criteria?: string[];
   /** How the UI state maps onto the parameter value, e.g. "OFF → false · ON → true". */
   valueMap?: string;
   note?: string;
@@ -40,6 +42,21 @@ const DDS_CREATE = "Create DDA";
 const DETAIL = "GET /direct-debit/v1/contracts/{mandateId} (S10 not written — names per George v2 §5.3)";
 const LIST = "POST /direct-debit/v1/contracts/search (S10 not written — names per George v2 §5.2)";
 const COLLECTIONS = "Collections in GET /direct-debit/v1/contracts/{mandateId} (names per George v2 §5.3/§5.7)";
+
+const SUMMARY = "POST /direct-debit/v1/contracts/summary (built; six KPI groups with amounts and currency)";
+const KPI_SCOPE =
+  "Scope for every card: all contracts in the selected stores. Cards ignore search, status/frequency/instrument filters and any date range (decision 9), show 0 when empty, and are hidden while a search is active (US-05).";
+
+function kpi(title: string, group: string, criteria: string[]): FieldHintDef {
+  return {
+    title: `KPI card — ${title}`,
+    direction: "pull",
+    endpoint: SUMMARY,
+    lines: [{ system: "BE API", ref: group, note: "response group (name per the built summary endpoint — confirm with the BE)" }],
+    criteria,
+    note: KPI_SCOPE,
+  };
+}
 
 function toggle(title: string, field: string, def: string, note?: string): FieldHintDef {
   return {
@@ -814,6 +831,35 @@ export const DD_FIELD_HINTS = {
     ],
     note: "Channels: SMS, email and WhatsApp, Arabic + English. Review URL = https://<portal-host>/contracts/review/{mandateId}.",
   },
+
+  // ---------------- Portfolio KPI cards (US-03, corrected by US-03.1; Confluence S10 section 5) ----------------
+  "kpi.active": kpi("DD Active", "active", [
+    "Counts contracts whose mandate status is DD Active (DDS ACCP).",
+    "Includes DD Active contracts with a cancellation pending (shown in the sub-line).",
+    "Sub-line: sum of the max contract amount of those contracts.",
+  ]),
+  "kpi.pendingSign": kpi("Pending Customer Sign", "pendingCustomerSign", [
+    "Counts contracts at DD Pending (DDS PNDG): created at DDS, waiting for the customer to sign.",
+    "Also counts Awaiting Customer Details — a TBFC-only status, Phase 2, so always 0 in this phase.",
+    "Not counted: Link Expired, Not Submitted, Discarded, DD Request Expired.",
+  ]),
+  "kpi.pendingBank": kpi("Pending Bank Approval", "pendingBankApproval", [
+    "Counts contracts at Pending System Submission (DDS SUBP) or Pending Bank Approval (DDS APRP): signed, waiting for the Central Bank / paying bank.",
+  ]),
+  "kpi.totalCollections": kpi("Total Collections", "totalCollections", [
+    "Count and total amount of collections with status Paid only (TB-1).",
+    "Never counts Scheduled, Submitted, Representment Pending, Rejected, Failed, Error or Skipped collections.",
+    "A collection paid on a retry counts once, at its paid amount.",
+  ]),
+  "kpi.failedCollections": kpi("Failed Collections", "failedCollections", [
+    "Total amount and count of collections with status Failed — final: retries exhausted, retry deadline passed, or a terminal refusal.",
+    "Not counted: Rejected collections still inside their retry window; collections in Error (validation errors, re-set with Amend).",
+    "Sub-line also shows how many contracts have at least one Failed collection.",
+  ]),
+  "kpi.declined": kpi("Declined Contracts", "declinedContracts", [
+    "Counts contracts whose mandate ended DD Rejected (DDS RJCT) or DD Error (DDS ERR).",
+    "No DD Denied — banks do not support DENY (DDS, 15-Oct-2026; decision 14).",
+  ]),
 } satisfies Record<string, FieldHintDef>;
 
 export type HintKey = keyof typeof DD_FIELD_HINTS;
