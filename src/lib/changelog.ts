@@ -15,7 +15,7 @@ export interface ChangelogEntry {
   description: string;
 }
 
-export const LAST_UPDATED = "15 Oct 2026";
+export const LAST_UPDATED = "19 Oct 2026";
 
 // Full history below covers Direct Debit specifically, back to its first release on the portal
 // (01 Sep 2026) — compiled 09 Sep 2026 from the repo's commit history across every session so far.
@@ -27,6 +27,16 @@ export const LAST_UPDATED = "15 Oct 2026";
 // pass on GitHub. Corrected back to match the actual shipped code (customer picks under TBFC,
 // confirmed live by Rabbani on 10-Sep-2026) rather than silently left stale.
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    date: "19 Oct 2026",
+    description:
+      "Direct Debit KPI cards: with Dev hints on, each card has an ⓘ listing its display criteria — what is counted (statuses, Paid only, Failed only, Rejected + Error), what is not, and the shared scope rule (all contracts in the selected stores; not search, filters or dates; hidden while searching). MP Backlog US-03 / US-03.1.",
+  },
+  {
+    date: "18 Oct 2026",
+    description:
+      "Add Contract: an amber hint under Emirates ID when the selected store already has an unsigned contract (Awaiting Customer Details, Not Submitted, DD Pending or Link Expired) for the same Emirates ID — lists its merchant reference and status. A warning only; creation is not blocked (MP Backlog US-07, DDS go-live checklist).",
+  },
   {
     date: "15 Oct 2026",
     description:
