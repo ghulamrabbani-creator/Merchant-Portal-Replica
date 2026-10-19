@@ -215,15 +215,15 @@ export default function DirectDebitPage() {
         </div>
       )}
 
-      {/* US-03: hidden while a search is active; computed from the stores and filters in view. */}
+      {/* US-03: hidden while a search is active; computed from every contract in the selected stores (not filters). Dev hints show each card's criteria. */}
       {hydrated && !searching && (
         <div className="mb-5 flex gap-3" data-testid="dd-kpis">
-          <StatCard label="DD Active" value={String(kpi.active.n)} sub={`Max contract value: ${formatMoneyAED(kpi.active.value)}${kpi.active.cancelling ? ` · incl. ${kpi.active.cancelling} cancellation pending` : ""}`} />
-          <StatCard label="Pending Customer Sign" value={String(kpi.pendingSign.n)} sub={`${kpi.pendingSign.awaiting} awaiting customer details`} />
-          <StatCard label="Pending Bank Approval" value={String(kpi.pendingBank.n)} sub="Submitted or approved by the paying bank" />
-          <StatCard label="Total Collections" value={String(kpi.paid.n)} sub={`${formatMoneyAED(kpi.paid.amount)} collected (Paid only)`} />
-          <StatCard label="Failed Collections" value={formatMoneyAED(kpi.failed.amount)} sub={`${kpi.failed.n} collections · ${kpi.failed.contracts} contracts`} />
-          <StatCard label="Declined Contracts" value={String(kpi.declined.n)} sub="DD Rejected or DD Error" />
+          <StatCard label="DD Active" hint={<FieldHint k="kpi.active" />} value={String(kpi.active.n)} sub={`Max contract value: ${formatMoneyAED(kpi.active.value)}${kpi.active.cancelling ? ` · incl. ${kpi.active.cancelling} cancellation pending` : ""}`} />
+          <StatCard label="Pending Customer Sign" hint={<FieldHint k="kpi.pendingSign" />} value={String(kpi.pendingSign.n)} sub={`${kpi.pendingSign.awaiting} awaiting customer details`} />
+          <StatCard label="Pending Bank Approval" hint={<FieldHint k="kpi.pendingBank" />} value={String(kpi.pendingBank.n)} sub="Submitted or approved by the paying bank" />
+          <StatCard label="Total Collections" hint={<FieldHint k="kpi.totalCollections" />} value={String(kpi.paid.n)} sub={`${formatMoneyAED(kpi.paid.amount)} collected (Paid only)`} />
+          <StatCard label="Failed Collections" hint={<FieldHint k="kpi.failedCollections" />} value={formatMoneyAED(kpi.failed.amount)} sub={`${kpi.failed.n} collections · ${kpi.failed.contracts} contracts`} />
+          <StatCard label="Declined Contracts" hint={<FieldHint k="kpi.declined" />} value={String(kpi.declined.n)} sub="DD Rejected or DD Error" />
         </div>
       )}
 
