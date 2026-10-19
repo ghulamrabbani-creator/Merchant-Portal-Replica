@@ -126,6 +126,16 @@ export default function FieldHint({
                 </div>
               ))}
             </div>
+            {def.criteria && (
+              <div className="mt-2">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">Counted when</div>
+                <ul className="flex list-disc flex-col gap-0.5 pl-4">
+                  {def.criteria.map((c, i) => (
+                    <li key={i}>{c}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {def.valueMap && (
               <div className="mt-2 font-mono text-[10.5px] text-slate-300">{def.valueMap}</div>
             )}
