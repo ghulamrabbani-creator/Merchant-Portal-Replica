@@ -46,7 +46,7 @@ import {
   DirectDebitOccurrence,
 } from "@/lib/types";
 import { directDebitContracts, DD_STORES } from "@/lib/mock-data";
-import { saveCreatedContract } from "@/lib/dd-contract-store";
+import { saveCreatedContract, useAllContracts } from "@/lib/dd-contract-store";
 import FieldHint, { DevHintsFloatingToggle } from "@/components/directdebit/FieldHint";
 import { HintKey } from "@/lib/dd-field-map";
 
@@ -115,6 +115,25 @@ export default function CreateDirectDebitContractModal({
   const [merchantRef, setMerchantRef] = useState(() => `INV-${Date.now().toString().slice(-8)}`);
   // Store (MID) the contract belongs to — only DD-enabled stores are offered (US-07).
   const [storeId, setStoreId] = useState(DD_STORES[0].id);
+  // US-07 (DDS go-live checklist, optional): warn — never block — when this store already has an
+  // unsigned contract for the same Emirates ID, so the merchant doesn't create a duplicate mandate.
+  const allContracts = useAllContracts();
+  const sameEidUnsigned = useMemo(() => {
+    const eid = customerIdNumber.replace(/\D/g, "");
+    if (eid.length !== 15) return [];
+    const unsigned: DirectDebitContract["status"][] = [
+      "Awaiting Customer Details",
+      "Not Submitted",
+      "Pending Customer Sign",
+      "Link Expired",
+    ];
+    return allContracts.filter(
+      (c) =>
+        c.storeId === storeId &&
+        unsigned.includes(c.status) &&
+        c.customerIdNumber.replace(/\D/g, "") === eid
+    );
+  }, [allContracts, customerIdNumber, storeId]);
   // Prototype: what DDS answers to Create DDA (US-13) — success, refused, or no answer in time.
   const [ddsOutcome, setDdsOutcome] = useState<"success" | "rejected" | "unknown">("success");
   // Customer-facing (Mandate.contract_description, added Sep 2026) — distinct from Notes below,
@@ -592,6 +611,24 @@ export default function CreateDirectDebitContractModal({
                     onChange={(e) => setCustomerIdNumber(e.target.value)}
                     className="w-full rounded-lg border border-border-color px-3 py-2.5 text-sm outline-none"
                   />
+                  {sameEidUnsigned.length > 0 && (
+                    <div
+                      data-testid="same-eid-unsigned-hint"
+                      className="mt-1.5 flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11.5px] text-amber-800"
+                    >
+                      <AlertCircle size={13} className="mt-px shrink-0" />
+                      <span>
+                        This store already has {sameEidUnsigned.length === 1 ? "an unsigned contract" : `${sameEidUnsigned.length} unsigned contracts`}{" "}
+                        for this Emirates ID:{" "}
+                        {sameEidUnsigned
+                          .slice(0, 3)
+                          .map((c) => `${c.merchantRef} (${c.status})`)
+                          .join(", ")}
+                        . Check {sameEidUnsigned.length === 1 ? "it" : "them"} before creating another, or discard the old one. You can
+                        still continue.
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
