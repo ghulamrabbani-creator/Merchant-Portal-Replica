@@ -18,7 +18,6 @@ import {
   formatInstrumentRef,
   maskMobile,
   nextContractRef,
-  PENDING_INSTRUMENT_REF_LABEL,
   activityEvent,
   validateCardNumber,
   validateIban,
@@ -175,7 +174,6 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
               Requested by
             </div>
             <div className="text-sm font-semibold text-text-primary">{STORE_NAME}</div>
-            <div className="mt-0.5 text-xs text-text-muted">Merchant reference: {c.merchantRef}</div>
           </div>
           <div className="rounded-xl border border-border-color bg-white p-5">
             <div className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Customer</div>
@@ -193,7 +191,7 @@ export default function ContractReviewSign({ contract }: { contract: DirectDebit
             Contract terms
           </div>
           <div className="grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm">
-            <Row label="Contract reference" value={c.ref || PENDING_INSTRUMENT_REF_LABEL} />
+            <Row label="Merchant reference" value={c.merchantRef} />
             <Row label="Contract duration" value={`${c.commencesOn} – ${c.expiresOn}`} />
             <Row label="Collection frequency" value={c.collectionFrequency ?? c.frequency} />
             <Row

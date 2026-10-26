@@ -17,7 +17,7 @@ import FieldHint from "@/components/directdebit/FieldHint";
 import { useDDConfig } from "@/lib/dd-config-context";
 import { useAllContracts, useHydrated } from "@/lib/dd-contract-store";
 import { HintKey } from "@/lib/dd-field-map";
-import { applyRetryResult, applyRetrySubmitted, contractStatusLabel, formatMoneyAED, isCancellationPending, statusFilterKey } from "@/lib/direct-debit";
+import { applyRetryResult, applyRetrySubmitted, collectionOutcomeLabel, contractStatusLabel, formatMoneyAED, isCancellationPending, isUnrecoveredFailure, nextCollection, previousCollection, statusFilterKey } from "@/lib/direct-debit";
 import { DD_STORES } from "@/lib/mock-data";
 import { discardBlockedReason, discardContract, resendBlockedReason, resendSigningLink, useContractsVersion } from "@/lib/dd-actions";
 import { DirectDebitContract, DirectDebitOccurrence } from "@/lib/types";
@@ -25,8 +25,9 @@ import { DirectDebitContract, DirectDebitOccurrence } from "@/lib/types";
 function collectionSummary(occurrences: DirectDebitOccurrence[]) {
   const successful = occurrences.filter((o) => o.status === "Paid");
   // US-04 (14-Oct-2026): only Failed (final) collections count here. Rejected/Error can still be
-  // retried and are shown on the collection rows, not as failed.
-  const failed = occurrences.filter((o) => o.status === "Failed");
+  // retried and are shown on the collection rows, not as failed. 26-Oct-2026: a Failed collection
+  // whose amount was rolled onto a later one is not counted (that amount is still being collected).
+  const failed = occurrences.filter(isUnrecoveredFailure);
   return {
     successCount: successful.length,
     successAmount: successful.reduce((sum, o) => sum + o.amount, 0),
@@ -44,7 +45,7 @@ function computeKpis(list: DirectDebitContract[]) {
   const pendingSign = list.filter((c) => c.status === "Awaiting Customer Details" || c.status === "Pending Customer Sign");
   const pendingBank = list.filter((c) => c.status === "Pending System Submission" || c.status === "Pending Bank Approval");
   const paid = list.flatMap((c) => c.occurrences.filter((o) => o.status === "Paid"));
-  const failedByContract = list.map((c) => c.occurrences.filter((o) => o.status === "Failed")).filter((x) => x.length > 0);
+  const failedByContract = list.map((c) => c.occurrences.filter(isUnrecoveredFailure)).filter((x) => x.length > 0);
   const failed = failedByContract.flat();
   const declined = list.filter((c) => c.status === "Rejected" || c.status === "Error");
   return {
@@ -219,7 +220,7 @@ export default function DirectDebitPage() {
       {hydrated && !searching && (
         <div className="mb-5 flex gap-3" data-testid="dd-kpis">
           <StatCard label="DD Active" hint={<FieldHint k="kpi.active" />} value={String(kpi.active.n)} sub={`Max contract value: ${formatMoneyAED(kpi.active.value)}${kpi.active.cancelling ? ` · incl. ${kpi.active.cancelling} cancellation pending` : ""}`} />
-          <StatCard label="Pending Customer Sign" hint={<FieldHint k="kpi.pendingSign" />} value={String(kpi.pendingSign.n)} sub={`${kpi.pendingSign.awaiting} awaiting customer details`} />
+          <StatCard label="Pending Customer Sign" hint={<FieldHint k="kpi.pendingSign" />} value={String(kpi.pendingSign.n)} sub={kpi.pendingSign.awaiting > 0 ? `${kpi.pendingSign.awaiting} awaiting customer details` : "Waiting for the customer to sign"} />
           <StatCard label="Pending Bank Approval" hint={<FieldHint k="kpi.pendingBank" />} value={String(kpi.pendingBank.n)} sub="Submitted or approved by the paying bank" />
           <StatCard label="Total Collections" hint={<FieldHint k="kpi.totalCollections" />} value={String(kpi.paid.n)} sub={`${formatMoneyAED(kpi.paid.amount)} collected (Paid only)`} />
           <StatCard label="Failed Collections" hint={<FieldHint k="kpi.failedCollections" />} value={formatMoneyAED(kpi.failed.amount)} sub={`${kpi.failed.n} collections · ${kpi.failed.contracts} contracts`} />
@@ -265,6 +266,8 @@ export default function DirectDebitPage() {
               const isOpen = expanded === c.id;
               const occurrences = occurrencesOf(c);
               const summary = collectionSummary(occurrences);
+              const prev = previousCollection(occurrences);
+              const next = c.status === "Active" ? nextCollection(occurrences) : undefined;
               return (
                 <Fragment key={c.id}>
                   <tr
@@ -309,19 +312,18 @@ export default function DirectDebitPage() {
                     </td>
                     <td className="px-4 py-3 text-text-primary">{c.frequency}</td>
                     <td className="px-4 py-3">
-                      {c.prevDeduction ? (
+                      {prev ? (
                         <>
                           <span
                             className={clsx(
                               "font-semibold",
-                              c.prevDeduction.ok ? "text-status-completed" : "text-status-declined"
+                              prev.status === "Paid" ? "text-status-completed" : prev.status === "Submitted" ? "text-text-primary" : "text-status-declined"
                             )}
                           >
-                            {formatMoneyAED(c.prevDeduction.amount)}
+                            {formatMoneyAED(prev.amount)}
                           </span>
                           <div className="text-xs text-text-muted">
-                            {c.prevDeduction.date}
-                            {!c.prevDeduction.ok && " · Failed"}
+                            {prev.collectedOn ?? prev.dueDate} · {collectionOutcomeLabel(prev)}
                           </div>
                         </>
                       ) : (
@@ -329,10 +331,13 @@ export default function DirectDebitPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-text-primary">
-                      {c.nextDue ? (
+                      {next ? (
                         <>
-                          {formatMoneyAED(c.nextDue.amount)}
-                          <div className="text-xs text-text-muted">{c.nextDue.date}</div>
+                          {formatMoneyAED(next.amount)}
+                          <div className="text-xs text-text-muted">
+                            {next.dueDate}
+                            {c.subscriptionStatus === "Paused" && " · paused"}
+                          </div>
                         </>
                       ) : (
                         <span className="text-text-muted">—</span>

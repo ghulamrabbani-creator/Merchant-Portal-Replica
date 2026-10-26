@@ -10,7 +10,7 @@ import { useState } from "react";
 import clsx from "clsx";
 import Modal from "@/components/ui/Modal";
 import { DD_STATUS_FILTER, DDStatusFilterKey } from "@/lib/direct-debit";
-import { DD_FREQUENCIES, DDFrequency, DDInstrumentType } from "@/lib/types";
+import { DD_OFFERED_FREQUENCIES, DDFrequency, DDInstrumentType } from "@/lib/types";
 
 export interface DDListFilters {
   statuses: DDStatusFilterKey[];
@@ -88,7 +88,7 @@ export default function DirectDebitFiltersButton({ value, onApply }: { value: DD
           <div className="mb-6">
             <div className="mb-2 text-sm font-semibold text-text-primary">Frequency</div>
             <div className="flex flex-wrap gap-2">
-              {DD_FREQUENCIES.map((f) => (
+              {DD_OFFERED_FREQUENCIES.map((f) => (
                 <Chip key={f} label={f} selected={draft.frequencies.includes(f)} onClick={() => setDraft((d) => ({ ...d, frequencies: toggleIn(d.frequencies, f) }))} />
               ))}
             </div>

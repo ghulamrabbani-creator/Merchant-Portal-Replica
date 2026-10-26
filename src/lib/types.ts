@@ -130,6 +130,9 @@ export const DD_FREQUENCIES = [
   "One Time Only",
 ] as const;
 export type DDFrequency = (typeof DD_FREQUENCIES)[number];
+/** Frequencies offered in this phase (MP Backlog decision 20, 18-Oct-2026). Every Two Months,
+ *  Every Four Months and One Time Only stay in DD_FREQUENCIES (DDS supports them) but are not offered. */
+export const DD_OFFERED_FREQUENCIES: readonly DDFrequency[] = ["Daily", "Weekly", "Monthly", "Quarterly", "Half-yearly", "Annually"];
 
 // UAE bank list, per DDS REST API documentation's "Banks Master Table" (Direct Debit
 // Marketplace / Central Bank bank registry). Used to populate the bank-selection dropdown

@@ -35,6 +35,7 @@ import {
   sentPaymentRef,
   isTerminalReasonCode,
   parseNiceDate,
+  payoutInfo,
   reasonLabel,
   retryDeadline,
   retryEligibility,
@@ -155,7 +156,7 @@ export default function CollectionTable({
     // Scheduled / Submitted: show the deadline it WILL have if it's rejected (S7 §2.3 returns it).
     return (
       <div className="text-text-muted">
-        {formatDateNice(d)}
+        {!noWindow && formatDateNice(d)}
         {noWindow && (
           <div className="flex items-center gap-1 text-[11px] text-status-pending" title="The retry deadline falls on or before this collection's own due date — if it's rejected there is no time to retry.">
             <AlertTriangle size={11} /> No retry window
@@ -275,7 +276,18 @@ export default function CollectionTable({
               <td className="px-3.5 py-2">{statusCell(o)}</td>
               <td className="px-3.5 py-2 text-text-muted">{rolledOverText(contract, o, occurrences)}</td>
               <td className="px-3.5 py-2 text-[13px]">{deadlineCell(o)}</td>
-              <td className="px-3.5 py-2 text-text-muted">{o.payoutStatus || "—"}</td>
+              <td className="px-3.5 py-2 text-text-muted" data-testid={`payout-${o.seq}`}>
+                {(() => {
+                  const p = payoutInfo(o, today);
+                  if (p.state === "none") return p.label;
+                  return (
+                    <div>
+                      <div className={clsx("font-medium", p.state === "settled" ? "text-status-completed" : "text-status-pending")}>{p.label}</div>
+                      {p.date && <div className="text-[11px] text-text-muted">{p.state === "settled" ? `Paid out ${p.date}` : `Payout ${p.date} (T+1)`}</div>}
+                    </div>
+                  );
+                })()}
+              </td>
               <td className="px-3.5 py-2 text-text-muted">{o.collectedOn || "—"}</td>
               <td className="px-3.5 py-2">{actionsCell(o)}</td>
             </tr>

@@ -15,7 +15,7 @@ export interface ChangelogEntry {
   description: string;
 }
 
-export const LAST_UPDATED = "19 Oct 2026";
+export const LAST_UPDATED = "26 Oct 2026";
 
 // Full history below covers Direct Debit specifically, back to its first release on the portal
 // (01 Sep 2026) — compiled 09 Sep 2026 from the repo's commit history across every session so far.
@@ -27,6 +27,11 @@ export const LAST_UPDATED = "19 Oct 2026";
 // pass on GitHub. Corrected back to match the actual shipped code (customer picks under TBFC,
 // confirmed live by Rabbani on 10-Sep-2026) rather than silently left stale.
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    date: "26 Oct 2026",
+    description:
+      "Direct Debit demo refresh. (1) Every scenario contract is now dated relative to today, so no collection is ever past due and still Scheduled (Retries Exhausted, Pending Approval, Rollover Blocked, Paused Skipped, Rollover Recovered, Rollover Exhausted, Pause Skips). (2) Payout per collection: each Paid collection shows its T+1 payout (next working day) — Settled with the payout date, Payout today, or Pending settlement; Rollover Recovered #4 was paid on the last working day to show it. (3) Failed Collections (list KPI, row and detail) no longer count a failure whose amount was rolled onto a later collection — the amount is counted once, where it ended up. (4) Contract list Previous Deduction / Next Due come from the schedule and show the real outcome (Paid, Rejected, Error, Submitted, Retry in progress) instead of 'Failed'. (5) Only this phase's frequencies are offered (Daily, Weekly, Monthly, Quarterly, Half-yearly, Annually — decision 20). (6) TBFC hidden (Phase 2) and its demo contract removed. (7) Customer review page shows the merchant reference, not the internal DD-… reference (decision 10). (8) Small fixes: Error Collection's reason text, retry deadline on the last collection, a hydration warning on DDS Refused Create.",
+  },
   {
     date: "19 Oct 2026",
     description:

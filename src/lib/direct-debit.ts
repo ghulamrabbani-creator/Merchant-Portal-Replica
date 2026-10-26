@@ -1,4 +1,4 @@
-import { DD_FREQUENCIES, DDActivityEvent, DDAmountType, DDCancellation, DDContractStatus, DDFrequency, DDSubscriptionStatus, DirectDebitContract, DirectDebitOccurrence } from "./types";
+import { DD_FREQUENCIES, DD_OFFERED_FREQUENCIES, DDActivityEvent, DDAmountType, DDCancellation, DDContractStatus, DDFrequency, DDSubscriptionStatus, DirectDebitContract, DirectDebitOccurrence } from "./types";
 
 // Ported from the Direct Debit Contracts design canvas (Create Contracts & Subscription flow).
 // Central Bank rule: no more than one collection per the mandate's own payment_frequency period —
@@ -15,7 +15,7 @@ export const FREQ_MONTHS: Record<DDFrequency, number> = {
   "One Time Only": 999,
 };
 
-export { DD_FREQUENCIES };
+export { DD_FREQUENCIES, DD_OFFERED_FREQUENCIES };
 
 // Max Payment Representment attempts per Order Model (Payment.retry_count), mirroring
 // UAE cheque-bounce rules: original attempt + up to 3 retries = 4 total attempts.
@@ -121,7 +121,7 @@ export function buildOccurrenceSchedule({
 
 /** Collection frequencies no more frequent than the contract's payment frequency ceiling. */
 export function collectionFrequencyOptions(ceiling: DDFrequency): DDFrequency[] {
-  return DD_FREQUENCIES.filter((f) => FREQ_MONTHS[f] >= FREQ_MONTHS[ceiling]);
+  return DD_OFFERED_FREQUENCIES.filter((f) => FREQ_MONTHS[f] >= FREQ_MONTHS[ceiling]);
 }
 
 // ---- DDS frequency table (Backend Stories S1 §5.2 / S2 V8 — DDS-confirmed 24-Sep-2026) ----
@@ -906,4 +906,48 @@ export function applyRetryResult(
 /** Id for a contract created in this browser (time-based, like the original dd${Date.now()}). */
 export function newContractId(): string {
   return `dd${Date.now()}`;
+}
+
+// ---- Collection summaries derived from the schedule (26-Oct-2026) ----
+// The list's Previous Deduction / Next Due and the payout column are derived from the collections
+// themselves, so they never drift from the schedule shown on Contract Detail.
+
+/** A Failed collection whose amount was NOT carried onto a later collection by automatic rollover —
+ *  i.e. money actually lost. Rolled-over failures are excluded so a carried amount isn't counted
+ *  twice (once on the original collection, again on the one it was added to). */
+export function isUnrecoveredFailure(o: DirectDebitOccurrence): boolean {
+  return o.status === "Failed" && o.rolledOver !== "rolled_over";
+}
+
+const SENT_STATUSES = ["Paid", "Rejected", "Failed", "Error", "Submitted"] as const;
+
+/** Latest collection that has been sent to DDS (any outcome). */
+export function previousCollection(occurrences: DirectDebitOccurrence[]): DirectDebitOccurrence | undefined {
+  return [...occurrences].filter((o) => (SENT_STATUSES as readonly string[]).includes(o.status)).sort((a, b) => a.seq - b.seq).pop();
+}
+
+/** First collection still to be sent. */
+export function nextCollection(occurrences: DirectDebitOccurrence[], today: Date = ddToday()): DirectDebitOccurrence | undefined {
+  return occurrences.find((o) => o.status === "Scheduled" && parseNiceDate(o.dueDate) >= today);
+}
+
+/** Short merchant-facing label for a sent collection's outcome. */
+export function collectionOutcomeLabel(o: DirectDebitOccurrence): string {
+  if (o.paymentStatus === "RPND") return "Retry in progress";
+  if (o.status === "Error") return "Error";
+  return o.status;
+}
+
+/** Merchant payout for a Paid collection: T+1 — the next working day after the debit (Dheeraj,
+ *  06-Oct-2026; APEX prices and pays). Derived from the debit date so it is always current. */
+export function payoutInfo(o: DirectDebitOccurrence, today: Date = ddToday()): { label: string; date?: string; state: "settled" | "today" | "pending" | "none" } {
+  if (o.status !== "Paid") return { label: "—", state: "none" };
+  const debit = parseNiceDate(o.collectedOn ?? o.dueDate);
+  if (isNaN(debit.getTime())) return { label: o.payoutStatus || "—", state: "none" };
+  const payout = addWorkingDays(debit, 1);
+  const date = formatDateNice(payout);
+  const d = diffDays(today, payout);
+  if (d < 0) return { label: "Settled", date, state: "settled" };
+  if (d === 0) return { label: "Payout today", date, state: "today" };
+  return { label: "Pending settlement", date, state: "pending" };
 }

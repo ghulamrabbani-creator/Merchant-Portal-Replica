@@ -9,7 +9,7 @@ import {
   DirectDebitOccurrence,
   DDFrequency,
 } from "./types";
-import { occurrenceBaseDate, formatDateNice, ddToday, addDays, toDateInputValue, formatCreatedOn, parseDateStr, DD_REFERENCE_CODE } from "./direct-debit";
+import { occurrenceBaseDate, formatDateNice, ddToday, addDays, toDateInputValue, formatCreatedOn, parseDateStr, previousWorkingDay, DD_REFERENCE_CODE } from "./direct-debit";
 
 export const STORE_NAME = "Acme Retail Demo LLC";
 
@@ -484,6 +484,28 @@ const DD13_START = relIso(-14);
 const DD14_START = relIso(-20);
 // dd15 — #1 paid a month before #2; #2 (due 3 days ago) came back in Error (payment validation error).
 const DD15_START = shiftMonthsIso(relIso(-3), -1);
+// 26-Oct-2026: the remaining scenario contracts are anchored on today too, so their schedules never
+// show past-due collections still Scheduled. Each comment says which collection is the reference.
+// dd2 — #2 Failed (3 of 3 retries) 25 days ago; its retry window has closed; #3 is upcoming.
+const DD2_P2 = relIso(-25);
+const DD2_START = shiftMonthsIso(DD2_P2, -1);
+// dd3 — sent to the bank 2 working days ago; first collection in 2 weeks.
+const DD3_FIRST = relIso(14);
+// dd4 — #2 Failed 12 days ago, rollover blocked by the max amount; #3 upcoming.
+const DD4_P2 = relIso(-12);
+const DD4_START = shiftMonthsIso(DD4_P2, -1);
+// dd5 — paused 20 days ago; #3 came due 15 days ago during the pause and was Skipped.
+const DD5_S3 = relIso(-15);
+const DD5_START = shiftMonthsIso(DD5_S3, -2);
+// dd7 — #4 paid on the last working day (its T+1 payout is due today or next working day).
+const DD7_P4 = toDateInputValue(previousWorkingDay(TODAY));
+const DD7_START = shiftMonthsIso(DD7_P4, -3);
+// dd9 — #7 paid 8 days ago (after the rollover run); #8 upcoming.
+const DD9_P7 = relIso(-8);
+const DD9_START = shiftMonthsIso(DD9_P7, -6);
+// dd10 — paused; #2–#4 Skipped, the last 6 days ago; #5 and #6 upcoming.
+const DD10_S4 = relIso(-6);
+const DD10_START = shiftMonthsIso(DD10_S4, -3);
 
 function genOccurrences(
   isoStart: string,
@@ -548,27 +570,26 @@ export const directDebitContracts: DirectDebitContract[] = [
     ref: "DD-2026-00139",
     merchantRef: "INV-2026-08144",
     contractDescription: "Monthly membership fee for your annual subscription plan.",
-    createdOn: "25 Aug 2026, 02:30 PM",
-    customerName: "Retries Exhausted", // demo: retries exhausted, rollover disabled on this contract
+    createdOn: formatCreatedOn(addDays(parseDateStr(DD2_START), -7)),
+    customerName: "Retries Exhausted", // demo: #2 Failed after 3 of 3 retries, rollover disabled on this contract
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1988-2345678-2",
     instrumentType: "Credit Card",
     maskedInstrumentRef: "•••7734",
-    commencesOn: "01 Sep 2026",
-    expiresOn: "01 Aug 2027", // 12 monthly occurrences
+    commencesOn: nice(DD2_START),
+    expiresOn: nice(shiftMonthsIso(DD2_START, 11)), // 12 monthly occurrences
     frequency: "Monthly",
     amountType: "Fixed",
     minAmount: 6200,
     maxAmount: 6200,
-    prevDeduction: { amount: 6200, date: "01 Sep 2026", ok: false },
-    nextDue: { amount: 6200, date: "01 Oct 2026" },
     rolloverEnabled: false,
     rolloversAllowed: 0,
     rolloverRemaining: 0,
     status: "Active",
     subscriptionStatus: "Active",
-    occurrences: genOccurrences("2026-09-01", "Monthly", 12, 6200, {
-      1: { status: "Failed", rolledOver: "none", retryCount: 3, payoutStatus: "—", reasonCode: "I", note: "Final — 3 of 3 retries used (rollover is off on this contract)" },
+    occurrences: genOccurrences(DD2_START, "Monthly", 12, 6200, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: nice(DD2_START), payoutStatus: "Settled", reasonCode: "0" },
+      2: { status: "Failed", rolledOver: "none", retryCount: 3, payoutStatus: "—", reasonCode: "I", note: "Final — 3 of 3 retries used (rollover is off on this contract)" },
     }),
   },
   {
@@ -576,55 +597,53 @@ export const directDebitContracts: DirectDebitContract[] = [
     ref: "DD-2026-00135",
     merchantRef: "INV-2026-07998",
     contractDescription: "Quarterly service charge for your maintenance agreement.",
-    createdOn: "18 Aug 2026, 11:00 AM",
-    customerName: "Pending Approval", // demo: mandate Pending Bank Approval, no occurrences generated yet
+    createdOn: formatCreatedOn(addDays(TODAY, -4)),
+    customerName: "Pending Approval", // demo: mandate DD Pending Bank Approval (APRP), collections planned
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1992-3456789-3",
     instrumentType: "Bank Account",
     bankName: "Mashreq",
     maskedInstrumentRef: "•••2290",
-    commencesOn: "20 Aug 2026",
-    expiresOn: "20 May 2027", // 9-month term, quarterly -> 4 occurrences once active
+    commencesOn: nice(relIso(7)),
+    expiresOn: nice(shiftMonthsIso(DD3_FIRST, 9)), // quarterly -> 4 collections
     frequency: "Quarterly",
     amountType: "Fixed",
     minAmount: 15000,
     maxAmount: 15000,
-    nextDue: { amount: 15000, date: "20 Nov 2026" },
     rolloverEnabled: true,
     rolloversAllowed: 3,
     rolloverRemaining: 3,
     status: "Pending Bank Approval",
     subscriptionStatus: "Active",
-    occurrences: [],
-    emptyNote: "No collections yet — contract is pending bank approval. Once Active, 4 quarterly occurrences will be generated through 20 May 2027.",
+    statusNote: "Signed by the customer — with the paying bank for approval (up to 3 working days)",
+    // Schedule generated at creation (TB-16): shown as planned until the mandate is DD Active.
+    occurrences: genOccurrences(DD3_FIRST, "Quarterly", 4, 15000),
   },
   {
     id: "dd4",
     ref: "DD-2026-00128",
     merchantRef: "INV-2026-07711",
     contractDescription: "Monthly installment for your 4-month payment plan.",
-    createdOn: "10 Jul 2026, 04:45 PM",
+    createdOn: formatCreatedOn(addDays(parseDateStr(DD4_START), -6)),
     customerName: "Rollover Blocked", // demo: rollover blocked — ceiling equals the installment itself
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1985-4567890-4",
     instrumentType: "Bank Account",
     bankName: "First Abu Dhabi Bank",
     maskedInstrumentRef: "•••5013",
-    commencesOn: "15 Jul 2026",
-    expiresOn: "15 Oct 2026", // 4-month term
+    commencesOn: nice(DD4_START),
+    expiresOn: nice(shiftMonthsIso(DD4_START, 3)), // 4-month term
     frequency: "Monthly",
     amountType: "Fixed",
     minAmount: 3500,
     maxAmount: 3500, // ceiling equals the installment itself — any rollover attempt is necessarily blocked
-    prevDeduction: { amount: 3500, date: "15 Aug 2026", ok: false },
-    nextDue: { amount: 3500, date: "15 Sep 2026" },
     rolloverEnabled: true,
     rolloversAllowed: 1,
     rolloverRemaining: 1, // unchanged — a block never decrements this (Order Model: only an actual successful roll does)
     status: "Active", // fixed from "Suspended": a failed collection must not suspend the contract
     subscriptionStatus: "Active",
-    occurrences: genOccurrences("2026-07-15", "Monthly", 4, 3500, {
-      1: { status: "Paid", rolledOver: "none", collectedOn: "15 Jul 2026", payoutStatus: "Settled" },
+    occurrences: genOccurrences(DD4_START, "Monthly", 4, 3500, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: nice(DD4_START), payoutStatus: "Settled", reasonCode: "0" },
       2: { status: "Failed", rolledOver: "blocked_by_ceiling", retryCount: 3, payoutStatus: "—", reasonCode: "I", note: "Final — 3 of 3 retries used. Automatic rollover blocked: it would exceed the contract's max amount" },
     }),
   },
@@ -633,28 +652,27 @@ export const directDebitContracts: DirectDebitContract[] = [
     ref: "DD-2026-00121",
     merchantRef: "INV-2026-07340",
     contractDescription: "Monthly subscription fee for your 2-year service plan.",
-    createdOn: "05 Jul 2026, 09:00 AM",
+    createdOn: formatCreatedOn(addDays(parseDateStr(DD5_START), -5)),
     customerName: "Paused Skipped", // demo: subscription Paused, occurrence #3 Skipped, 24-occurrence/2yr cap
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1990-5678901-5",
     instrumentType: "Credit Card",
     maskedInstrumentRef: "•••9042",
-    commencesOn: "10 Jul 2026",
-    expiresOn: "10 Jun 2028", // 2-year term -> 24 occurrences (the guided flow's own display cap)
+    commencesOn: nice(DD5_START),
+    expiresOn: nice(shiftMonthsIso(DD5_START, 23)), // 2-year term -> 24 collections
     frequency: "Monthly",
     amountType: "Fixed",
     minAmount: 5000,
     maxAmount: 5000,
-    prevDeduction: { amount: 5000, date: "10 Aug 2026", ok: true },
     rolloverEnabled: true,
     rolloversAllowed: 1,
     rolloverRemaining: 1,
     status: "Active",
     subscriptionStatus: "Paused",
-    pausedNote: "Subscription paused on 15 Aug 2026 — mandate remains Active. Occurrence #3 came due during the pause and was marked Skipped (reason: paused). Its amount is not collected automatically — manual rollover is out of MVP scope. To recover it, resume and amend an upcoming collection's amount (Variable contracts only).",
-    occurrences: genOccurrences("2026-07-10", "Monthly", 24, 5000, {
-      1: { status: "Paid", rolledOver: "none", collectedOn: "10 Jul 2026", payoutStatus: "Settled" },
-      2: { status: "Paid", rolledOver: "none", collectedOn: "10 Aug 2026", payoutStatus: "Settled" },
+    pausedNote: `Subscription paused on ${nice(relIso(-20))} — mandate remains DD Active. Collection #3 came due during the pause and was Skipped (reason: paused); its amount is not collected automatically. Collections resume from the next due date once the merchant resumes.`,
+    occurrences: genOccurrences(DD5_START, "Monthly", 24, 5000, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: nice(DD5_START), payoutStatus: "Settled", reasonCode: "0" },
+      2: { status: "Paid", rolledOver: "none", collectedOn: nice(shiftMonthsIso(DD5_START, 1)), payoutStatus: "Settled", reasonCode: "0" },
       3: { status: "Skipped", rolledOver: "none", skipReason: "paused" },
     }),
   },
@@ -691,31 +709,29 @@ export const directDebitContracts: DirectDebitContract[] = [
     merchantRef: "INV-2026-06552",
     notes: "Service subscription — annual maintenance contract",
     contractDescription: "Annual maintenance contract — monthly service fee, billed based on usage.",
-    createdOn: "10 May 2026, 10:10 AM",
+    createdOn: formatCreatedOn(addDays(parseDateStr(DD7_START), -5)),
     customerName: "Rollover Recovered", // demo: occurrence #2 rolled over then fully recovered on #3
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1991-7890123-7",
     instrumentType: "Bank Account",
     bankName: "National Bank of Fujairah",
     maskedInstrumentRef: "•••1095",
-    commencesOn: "15 May 2026",
-    expiresOn: "15 Apr 2027", // 12 monthly occurrences
+    commencesOn: nice(DD7_START),
+    expiresOn: nice(shiftMonthsIso(DD7_START, 11)), // 12 monthly collections
     frequency: "Monthly",
     amountType: "Variable",
     minAmount: 4800,
     maxAmount: 12000,
-    prevDeduction: { amount: 4800, date: "15 Aug 2026", ok: true },
-    nextDue: { amount: 4800, date: "15 Sep 2026" },
     rolloverEnabled: true,
     rolloversAllowed: 2,
     rolloverRemaining: 1,
     status: "Active",
     subscriptionStatus: "Active",
-    occurrences: genOccurrences("2026-05-15", "Monthly", 12, 4800, {
-      1: { status: "Paid", rolledOver: "none", collectedOn: "15 May 2026", payoutStatus: "Settled" },
+    occurrences: genOccurrences(DD7_START, "Monthly", 12, 4800, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: nice(DD7_START), payoutStatus: "Settled", reasonCode: "0" },
       2: { status: "Failed", rolledOver: "rolled_over", retryCount: 3, payoutStatus: "—", reasonCode: "I", note: "Final — 3 of 3 retries used. Amount rolled automatically onto #3" },
-      3: { status: "Paid", amount: 9600, amountSource: "rollover_adjusted", rolledOverFrom: [2], collectedOn: "15 Jul 2026", payoutStatus: "Settled", note: "Includes AED 4,800.00 recovered from 15 Jun 2026 (occurrence #2)" },
-      4: { status: "Paid", rolledOver: "none", collectedOn: "15 Aug 2026", payoutStatus: "Settled" },
+      3: { status: "Paid", amount: 9600, amountSource: "rollover_adjusted", rolledOverFrom: [2], collectedOn: nice(shiftMonthsIso(DD7_START, 2)), payoutStatus: "Settled", reasonCode: "0", note: `Includes AED 4,800.00 recovered from ${nice(shiftMonthsIso(DD7_START, 1))} (collection #2)` },
+      4: { status: "Paid", rolledOver: "none", dueDate: nice(DD7_P4), collectedOn: nice(DD7_P4), reasonCode: "0", note: "Paid on the last working day — merchant payout is T+1" },
     }),
   },
   {
@@ -764,15 +780,15 @@ export const directDebitContracts: DirectDebitContract[] = [
     merchantRef: "INV-2026-05877",
     notes: "Equipment lease — consecutive-failure / rollover-exhaustion scenario",
     contractDescription: "Monthly equipment lease payment, billed based on usage.",
-    createdOn: "12 Feb 2026, 10:40 AM",
+    createdOn: formatCreatedOn(addDays(parseDateStr(DD9_START), -3)),
     customerName: "Rollover Exhausted", // demo: consecutive-streak rollover cap hit, then reset after a Paid occurrence
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1987-9012345-9",
     instrumentType: "Bank Account",
     bankName: "RAK Bank",
     maskedInstrumentRef: "•••7420",
-    commencesOn: "15 Feb 2026",
-    expiresOn: "15 Oct 2026", // 8 monthly occurrences
+    commencesOn: nice(DD9_START),
+    expiresOn: nice(shiftMonthsIso(DD9_START, 7)), // 8 monthly collections
     frequency: "Monthly",
     amountType: "Variable",
     minAmount: 3000,
@@ -782,14 +798,14 @@ export const directDebitContracts: DirectDebitContract[] = [
     rolloverRemaining: 0, // snapshot as of the last occurrence below — see canRolloverOccurrence for the live, derived figure
     status: "Active",
     subscriptionStatus: "Active",
-    occurrences: genOccurrences("2026-02-15", "Monthly", 8, 3000, {
-      1: { status: "Paid", rolledOver: "none", collectedOn: "15 Feb 2026", payoutStatus: "Settled" },
+    occurrences: genOccurrences(DD9_START, "Monthly", 8, 3000, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: nice(DD9_START), payoutStatus: "Settled", reasonCode: "0" },
       2: { status: "Failed", rolledOver: "rolled_over", retryCount: 3, payoutStatus: "—", reasonCode: "I", note: "Final — amount rolled automatically onto #3 (1 of 2 rollovers used)" },
       3: { status: "Failed", amount: 6000, rolledOverFrom: [2], rolledOver: "rolled_over", retryCount: 3, payoutStatus: "—", reasonCode: "I", note: "Includes AED 3,000.00 carried from #2. Final — rolled automatically onto #4 (2 of 2 rollovers used)" },
       4: { status: "Failed", amount: 9000, rolledOverFrom: [3], rolledOver: "exhausted", retryCount: 3, payoutStatus: "—", reasonCode: "I", note: "Includes AED 6,000.00 carried from #3. Final — no rollover left (2 of 2 used in this run); bounce memo is the proof of failure." },
-      5: { status: "Paid", rolledOver: "none", collectedOn: "15 Jun 2026", payoutStatus: "Settled", note: "Collected in full — this resets the rollover streak for anything that fails after it." },
+      5: { status: "Paid", rolledOver: "none", collectedOn: nice(shiftMonthsIso(DD9_START, 4)), payoutStatus: "Settled", note: "Collected in full — this resets the rollover streak for anything that fails after it." },
       6: { status: "Failed", rolledOver: "rolled_over", retryCount: 3, payoutStatus: "—", reasonCode: "I", note: "Final — rolled automatically onto #7 (fresh allowance: the streak reset after #5 was paid)" },
-      7: { status: "Paid", amount: 6000, rolledOverFrom: [6], collectedOn: "15 Aug 2026", payoutStatus: "Settled", note: "Includes AED 3,000.00 recovered from 15 Jul 2026 (occurrence #6)" },
+      7: { status: "Paid", amount: 6000, rolledOverFrom: [6], collectedOn: nice(DD9_P7), payoutStatus: "Settled", note: `Includes AED 3,000.00 recovered from ${nice(shiftMonthsIso(DD9_START, 5))} (collection #6)` },
       8: { status: "Scheduled" },
     }),
   },
@@ -803,15 +819,15 @@ export const directDebitContracts: DirectDebitContract[] = [
     merchantRef: "INV-2026-05412",
     notes: "Community charges — paused mid-term, three collections skipped",
     contractDescription: "Monthly community service charges, billed based on usage.",
-    createdOn: "02 Jan 2026, 03:50 PM",
+    createdOn: formatCreatedOn(addDays(parseDateStr(DD10_START), -8)),
     customerName: "Pause Skips", // demo: collections Skipped (paused) — no manual rollover in MVP
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1993-0123456-0",
     instrumentType: "Bank Account",
     bankName: "Sharjah Islamic Bank",
     maskedInstrumentRef: "•••3308",
-    commencesOn: "10 Jan 2026",
-    expiresOn: "10 Jul 2026", // 6 monthly occurrences
+    commencesOn: nice(DD10_START),
+    expiresOn: nice(shiftMonthsIso(DD10_START, 5)), // 6 monthly collections
     frequency: "Monthly",
     amountType: "Variable",
     minAmount: 4000,
@@ -821,59 +837,15 @@ export const directDebitContracts: DirectDebitContract[] = [
     rolloverRemaining: 2,
     status: "Active",
     subscriptionStatus: "Paused",
-    pausedNote: "Subscription paused on 08 Mar 2026 — mandate remains Active. #2–#4 came due during the pause and were Skipped (reason: paused). Skips caused by a pause are not rolled over automatically, and manual rollover is out of MVP scope — the merchant recovers an amount by amending an upcoming collection after resuming.",
-    occurrences: genOccurrences("2026-01-10", "Monthly", 6, 4000, {
-      1: { status: "Paid", rolledOver: "none", collectedOn: "10 Jan 2026", payoutStatus: "Settled" },
+    pausedNote: `Subscription paused on ${formatDateNice(addDays(parseDateStr(DD10_START), 20))} — mandate remains DD Active. #2–#4 came due during the pause and were Skipped (reason: paused). Skips caused by a pause are not rolled over automatically — on this Variable contract the merchant can add a skipped amount to an upcoming collection with Amend after resuming.`,
+    occurrences: genOccurrences(DD10_START, "Monthly", 6, 4000, {
+      1: { status: "Paid", rolledOver: "none", collectedOn: nice(DD10_START), payoutStatus: "Settled", reasonCode: "0" },
       2: { status: "Skipped", rolledOver: "none", skipReason: "paused" },
       3: { status: "Skipped", rolledOver: "none", skipReason: "paused" },
       4: { status: "Skipped", rolledOver: "none", skipReason: "paused" },
     }),
   },
-  // dd11 — To Be Filled By Customer (TBFC). Merchant leaves the ENTIRE instrument decision to the
-  // customer (Rabbani, 09-Sep-2026: type included, not just the account/card details — see
-  // instrumentType being left unset below, and the type picker on the Sign page's instrument
-  // step). Geidea holds the contract/subscription/occurrence schedule locally only — Create DDA
-  // is not called, so no DDS mandate reference exists yet. See Notes/Projects/Direct Debit.md,
-  // "To Be Filled By Customer (TBFC) instrument flow." Opening this contract's Sign link (or its
-  // Detail screen) is how a fresh session can see the awaiting-instrument state without having
-  // to create one by hand. (A second demo record, dd12, briefly existed to demo the credit-card
-  // side of the Sign page's instrument fields — removed once instrument TYPE moved to the
-  // customer's own choice, since either path is now reachable from this one record.)
-  {
-    id: "dd11",
-    ref: "", // no DDS reference yet — see PENDING_INSTRUMENT_REF_LABEL
-    merchantRef: "INV-2026-08890",
-    notes: "TBFC demo — instrument deferred to customer's own review-and-sign step",
-    contractDescription: "Monthly gym membership fee collection.",
-    createdOn: "08 Sep 2026, 04:20 PM",
-    customerName: "Awaiting Instrument", // demo: TBFC — no instrument chosen or supplied yet
-    customerIdType: "Emirates ID",
-    customerIdNumber: "784-1994-1122334-4",
-    customerEmail: "omar.haddad@example.com",
-    customerMobile: "0559876543",
-    signingNotificationCount: 1,
-    signingNotificationSentAt: "08 Sep 2026, 04:21 PM",
-    // instrumentType intentionally omitted — the customer hasn't chosen one yet (see types.ts).
-    maskedInstrumentRef: "", // not yet supplied
-    commencesOn: "15 Sep 2026",
-    expiresOn: "15 Sep 2027", // 12 monthly occurrences once the customer completes their step
-    frequency: "Monthly",
-    amountType: "Fixed",
-    minAmount: 250,
-    maxAmount: 250,
-    rolloverEnabled: false,
-    rolloversAllowed: 0,
-    rolloverRemaining: 0,
-    status: "Awaiting Customer Details",
-    subscriptionStatus: "Active",
-    instrumentProvidedBy: "customer",
-    mandateCreationStage: "awaiting_customer_instrument",
-    awaitingInstrumentNote:
-      "Waiting on the customer to choose a payment instrument (bank account or credit card) and supply its details on the contract sign page before this mandate can be submitted to DDS. Nothing has been sent to DDS yet — no reference exists until that step completes.",
-    // Schedule generated and held locally so the customer's review page has something to show —
-    // per the confirmed design, Subscription/Occurrence creation isn't gated on a dda_id existing.
-    occurrences: genOccurrences("2026-09-15", "Monthly", 12, 250),
-  },
+  // dd11 (TBFC demo) removed 26-Oct-2026 — TBFC is Phase 2 (MP Backlog decision 1).
   // dd12 — new 25-Sep-2026: terminal refusal (Backend Stories S6 §2.1). #2 came back RJCT with
   // reason A (Account closed) — a terminal code, so it went straight to Failed (no retry, no
   // rollover) and the contract was closed locally as "Cancelled — Account closed". Remaining
@@ -1022,7 +994,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     subscriptionStatus: "Active",
     occurrences: genOccurrences(DD15_START, "Monthly", 10, 1500, {
       1: { status: "Paid", rolledOver: "none", collectedOn: nice(DD15_START), payoutStatus: "Settled", reasonCode: "0" },
-      2: { status: "Error", rolledOver: "none", retryCount: 0, payoutStatus: "—", note: "DDS: frequency rule not met (debit too close to the previous one)" },
+      2: { status: "Error", rolledOver: "none", retryCount: 0, payoutStatus: "—", note: "DDS: payment validation error (ERR) — the payment row failed DDS validation and never reached the bank" },
     }),
   },
   // dd16 — signed, on its way to the bank (DD Pending System Submission, SUBP — US-14).
@@ -1092,7 +1064,7 @@ export const directDebitContracts: DirectDebitContract[] = [
     ref: "",
     merchantRef: "INV-2026-09166",
     contractDescription: "Monthly parking fee — Level P2, bay 41.",
-    createdOn: formatCreatedOn(new Date()),
+    createdOn: formatCreatedOn(new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 9, 40)),
     customerName: "DDS Refused Create",
     customerIdType: "Emirates ID",
     customerIdNumber: "784-1993-4455667-8",

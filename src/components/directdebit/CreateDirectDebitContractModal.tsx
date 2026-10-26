@@ -4,9 +4,13 @@ import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X, ChevronDown, Check, AlertCircle, Pencil, Table2 } from "lucide-react";
 import clsx from "clsx";
+
+/** TBFC (customer fills in the instrument) is Phase 2 — flip to true to show it again. */
+const TBFC_OFFERED = false;
 import { useDDConfig } from "@/lib/dd-config-context";
 import {
   DD_FREQUENCIES,
+  DD_OFFERED_FREQUENCIES,
   DDS_FREQUENCY_TABLE,
   addDays,
   addWorkingDays,
@@ -634,6 +638,8 @@ export default function CreateDirectDebitContractModal({
 
               <Label hint="create.paymentMethodType" hintValue={tbfc ? "absent (TBFC)" : JSON.stringify(effectiveInstrumentType)}>Payment instrument</Label>
 
+              {/* TBFC is Phase 2 (MP Backlog decision 1, 18-Oct-2026): the option is kept in code but not offered. */}
+              {TBFC_OFFERED && (
               <div className="mb-3 flex items-start gap-2.5 rounded-lg border border-border-color bg-page-bg px-3.5 py-3">
                 <button
                   onClick={() => setTbfc((v) => !v)}
@@ -656,6 +662,7 @@ export default function CreateDirectDebitContractModal({
                   </div>
                 </div>
               </div>
+              )}
 
               {!tbfc ? (
                 <>
@@ -814,7 +821,7 @@ export default function CreateDirectDebitContractModal({
                 </div>
                 <div>
                   <Label hint="create.frequencyCeiling" hintValue={JSON.stringify(frequencyCeiling)}>Payment frequency ceiling</Label>
-                  <SelectField value={frequencyCeiling} onChange={(v) => onCeilingChange(v as DDFrequency)} options={DD_FREQUENCIES} />
+                  <SelectField value={frequencyCeiling} onChange={(v) => onCeilingChange(v as DDFrequency)} options={DD_OFFERED_FREQUENCIES} />
                   <Help>DDS allows no more than one collection per this period</Help>
                 </div>
               </div>

@@ -41,6 +41,10 @@ import {
   cancelReasonLabel,
   isCancellationPending,
   isCancellationSigned,
+  isUnrecoveredFailure,
+  nextCollection,
+  previousCollection,
+  collectionOutcomeLabel,
 } from "@/lib/direct-debit";
 import { useContract } from "@/lib/dd-contract-store";
 import {
@@ -147,15 +151,15 @@ function ContractDetail({ c }: { c: DirectDebitContract }) {
 
   const summary = useMemo(() => {
     const paid = occurrences.filter((o) => o.status === "Paid");
-    const failed = occurrences.filter((o) => o.status === "Failed");
+    const failed = occurrences.filter(isUnrecoveredFailure); // rolled-over failures are counted where the amount went
     const scheduled = occurrences.filter((o) => o.status === "Scheduled");
     const collected = paid.reduce((sum, o) => sum + o.amount, 0);
     const outstanding = outstandingAmount(occurrences);
     // TB-16 / US-17: before activation the first collection is shown as planned.
-    const next = scheduled[0];
-    const last = [...paid, ...failed].sort((a, b) => a.seq - b.seq).pop();
+    const next = nextCollection(occurrences) ?? (c.status === "Active" ? undefined : scheduled[0]);
+    const last = previousCollection(occurrences);
     return { paid, failed, scheduled, collected, outstanding, next, last };
-  }, [occurrences]);
+  }, [occurrences, c.status]);
 
   const liveRolloverRemaining = Math.max(0, c.rolloversAllowed - rolloverStreakUsed(occurrences));
 
@@ -506,7 +510,7 @@ Customer: ${c.customerName}`)}`}
         <StatCard
           label="Failed Collections"
           value={formatMoneyAED(summary.failed.reduce((sum, o) => sum + o.amount, 0))}
-          sub={`${summary.failed.length} of ${occurrences.length} installments (final)`}
+          sub={`${summary.failed.length} of ${occurrences.length} installments (final, not rolled over)`}
         />
         <StatCard
           label="Outstanding"
@@ -541,7 +545,7 @@ Customer: ${c.customerName}`)}`}
           </div>
           <div>
             <Field label="Next collection" value={summary.next ? `${summary.next.dueDate} · ${formatMoneyAED(summary.next.amount)}` : "—"} />
-            <Field label="Last collection" value={summary.last ? `${summary.last.dueDate} (${summary.last.status})` : "—"} />
+            <Field label="Last collection" value={summary.last ? `${summary.last.collectedOn ?? summary.last.dueDate} (${collectionOutcomeLabel(summary.last)})` : "—"} />
             <Field label="Amount type" value={c.amountType} hint="view.amountType" />
             <Field
               label={c.amountType === "Fixed" ? "Amount per installment" : "Min / Max amount"}

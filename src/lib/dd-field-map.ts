@@ -853,7 +853,7 @@ export const DD_FIELD_HINTS = {
   ]),
   "kpi.failedCollections": kpi("Failed Collections", "failedCollections", [
     "Total amount and count of collections with status Failed — final: retries exhausted, retry deadline passed, or a terminal refusal.",
-    "Not counted: Rejected collections still inside their retry window; collections in Error (validation errors, re-set with Amend).",
+    "Not counted: Rejected collections still inside their retry window; collections in Error (validation errors, re-set with Amend); Failed collections whose amount was rolled onto a later collection (the amount is counted once, where it ended up).",
     "Sub-line also shows how many contracts have at least one Failed collection.",
   ]),
   "kpi.declined": kpi("Declined Contracts", "declinedContracts", [
