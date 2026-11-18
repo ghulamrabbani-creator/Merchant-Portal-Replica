@@ -54,7 +54,7 @@ function CancelFlow({ contract }: { contract: DirectDebitContract | undefined })
   const [state, setState] = useState<PageState>(() => initialPageState(contract));
   if (state === "READY" && contract) return <CancelReviewSign contract={contract} />;
   if (state === "OTP_REQUIRED" && contract)
-    return <CustomerVerification contract={contract} merchantName={STORE_NAME} onVerified={() => setState("READY")} />;
+    return <CustomerVerification contract={contract} merchantName={STORE_NAME} purpose="cancellation" onVerified={() => setState("READY")} />;
 
   const view =
     state === "ALREADY_SIGNED"

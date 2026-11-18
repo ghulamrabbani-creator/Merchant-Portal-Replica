@@ -61,11 +61,16 @@ export default function CustomerVerification({
   contract,
   merchantName,
   onVerified,
+  purpose = "contract",
 }: {
   contract: DirectDebitContract;
   merchantName: string;
   onVerified: () => void;
+  /** 18-Nov-2026: the same verification is used by the cancellation link (S8 §3.2), which needs
+   *  its own wording — the customer is cancelling an existing direct debit, not setting one up. */
+  purpose?: "contract" | "cancellation";
 }) {
+  const isCancel = purpose === "cancellation";
   const mobile = contract.customerMobile ?? "0501234567";
   const email = contract.customerEmail ?? "customer@example.com";
   const [channel, setChannel] = useState<"SMS" | "EMAIL">("SMS");
@@ -114,15 +119,25 @@ export default function CustomerVerification({
 
       <div className="mb-5">
         <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-text-muted">
-          Direct Debit contract from <FieldHint k="cust.merchantName" value={JSON.stringify(merchantName)} />
+          {isCancel ? "Direct Debit cancellation from" : "Direct Debit contract from"} <FieldHint k="cust.merchantName" value={JSON.stringify(merchantName)} />
         </div>
         <h1 className="text-2xl font-bold text-text-primary" data-testid="verify-merchant">
           {merchantName}
         </h1>
         <p className="mt-1.5 text-[13px] text-text-secondary">
-          {merchantName} has asked you to set up a Direct Debit. Confirm it&apos;s you to see the contract and sign it.
-          Your bank and DDS will show this contract under <strong>Geidea Payment LLC</strong>, which collects it on{" "}
-          {merchantName}&apos;s behalf.
+          {isCancel ? (
+            <>
+              {merchantName} has asked to cancel your Direct Debit. Confirm it&apos;s you to see the cancellation and sign it.
+              Your direct debit stays active, and payments can still be collected, until you sign. Your bank and DDS show
+              this direct debit under <strong>Geidea Payment LLC</strong>, which collects it on {merchantName}&apos;s behalf.
+            </>
+          ) : (
+            <>
+              {merchantName} has asked you to set up a Direct Debit. Confirm it&apos;s you to see the contract and sign it.
+              Your bank and DDS will show this contract under <strong>Geidea Payment LLC</strong>, which collects it on{" "}
+              {merchantName}&apos;s behalf.
+            </>
+          )}
         </p>
       </div>
 
@@ -131,7 +146,7 @@ export default function CustomerVerification({
           <FileText size={15} className="mt-0.5 shrink-0 text-text-muted" />
           <div>
             <div className="mb-0.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-              What this contract is for <FieldHint k="cust.description" />
+              {isCancel ? "The direct debit being cancelled" : "What this contract is for"} <FieldHint k="cust.description" />
             </div>
             <div className="text-[13px] leading-relaxed text-text-secondary" data-testid="verify-description">
               {contract.contractDescription}

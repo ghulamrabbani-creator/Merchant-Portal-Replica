@@ -30,7 +30,7 @@ export const CHANGELOG: ChangelogEntry[] = [
   {
     date: "18 Nov 2026",
     description:
-      "Direct Debit contract cancellation aligned to Confluence v2.7 (S8). (1) Customer messages are email only — no SMS — and the Contract Detail panel previews them: cancellation request, accepted, rejected by the bank. (2) The cancellation link no longer expires; the merchant can resend it once per day (was up to 5 resends with an expiry). (3) The customer page and the 'left before signing' message say the direct debit stays active, and payments can still be collected, until they sign. (4) When the bank accepts, Geidea cancels the mandate at once: payments already in a payment file run to the end; Scheduled, Skipped and Error collections become Cancelled and a Rejected collection awaiting retry becomes Failed.",
+      "Direct Debit contract cancellation aligned to Confluence v2.7 (S8). (1) Customer messages are email only — no SMS — and the Contract Detail panel previews them: cancellation request, accepted, rejected by the bank. (2) The cancellation link no longer expires; the merchant can resend it once per day (was up to 5 resends with an expiry). (3) The customer page and the 'left before signing' message say the direct debit stays active, and payments can still be collected, until they sign. (4) When the bank accepts, Geidea cancels the mandate at once: payments already in a payment file run to the end; Scheduled, Skipped and Error collections become Cancelled and a Rejected collection awaiting retry becomes Failed. (5) The identity check on the cancellation link has its own wording (cancel your Direct Debit, not set one up).",
   },
   {
     date: "26 Oct 2026",
