@@ -45,6 +45,7 @@ import {
   nextCollection,
   previousCollection,
   collectionOutcomeLabel,
+  occurrencesAfterCancellation,
 } from "@/lib/direct-debit";
 import { useContract } from "@/lib/dd-contract-store";
 import {
@@ -72,6 +73,8 @@ import Modal from "@/components/ui/Modal";
 import CollectionTable from "@/components/directdebit/CollectionTable";
 import AmendScheduleModal from "@/components/directdebit/AmendScheduleModal";
 import FieldHint from "@/components/directdebit/FieldHint";
+import CancellationEmailsPreview from "@/components/directdebit/CancellationEmails";
+import { STORE_NAME } from "@/lib/mock-data";
 import { DDSubscriptionStatus, DirectDebitContract, DirectDebitOccurrence } from "@/lib/types";
 
 // 14-Oct-2026 (MP Backlog v2): Cancel mandate removed (cancellation is a placeholder, US-21);
@@ -361,11 +364,11 @@ Customer: ${c.customerName}`)}`}
         </div>
       )}
 
-      {cx && (cxPending || cx.stage === "rejected") && (
+      {cx && (cxPending || cx.stage === "rejected" || cx.stage === "accepted") && (
         <div
           className={clsx(
             "mb-5 rounded-lg border px-4 py-3 text-sm text-text-primary",
-            cx.stage === "rejected" ? "border-status-declined/60 bg-status-declined/5" : "border-status-pending bg-status-pending/10"
+            cx.stage === "rejected" ? "border-status-declined/60 bg-status-declined/5" : cx.stage === "accepted" ? "border-border-color bg-page-bg" : "border-status-pending bg-status-pending/10"
           )}
           data-testid="cancellation-panel"
         >
@@ -374,6 +377,7 @@ Customer: ${c.customerName}`)}`}
             {cx.stage === "awaiting_customer" && "Cancellation pending — awaiting customer signature"}
             {cx.stage === "with_bank" && "Cancellation pending — with the bank"}
             {cx.stage === "rejected" && "Cancellation rejected by the bank"}
+            {cx.stage === "accepted" && "Cancellation accepted by the bank — contract DD Cancelled"}
           </div>
           <div className="text-[13px] text-text-secondary">
             Reason: {cancelReasonLabel(cx.reasonCode)} ({cx.reasonCode}){cx.comments ? ` — ${cx.comments}` : ""} · Requested by {cx.requestedBy}, {cx.requestedAt}
@@ -390,7 +394,7 @@ Customer: ${c.customerName}`)}`}
                   <b>Collections continue until the customer signs.</b> To stop them now, pause the subscription.
                 </>
               )}{" "}
-              Link sent {cx.notificationCount}× (max {MAX_RESENDS} resends) · valid until {cx.linkExpiresAt}. A cancellation request can&apos;t be withdrawn.
+              Link emailed {cx.notificationCount}×{cx.lastSentOn ? ` (last on ${cx.lastSentOn})` : ""} · resend once per day · the link works until the customer signs. A cancellation request can&apos;t be withdrawn.
             </div>
           )}
           {cx.stage === "with_bank" && (
@@ -401,6 +405,16 @@ Customer: ${c.customerName}`)}`}
           {cx.stage === "rejected" && (
             <div className="mt-1.5 text-[13px]">The contract is DD Active again and collections resume{subscriptionStatus === "Paused" ? " once you resume the subscription" : ""}. Collections skipped meanwhile can be recovered with Amend schedule.</div>
           )}
+          {cx.stage === "accepted" && (
+            <div className="mt-1.5 text-[13px]">
+              Geidea cancelled the mandate when the bank accepted the cancellation (no separate mandate check). Payments already in a payment file run to their final status; every other open collection was cancelled — no retry, representment, rollover or Amend.
+            </div>
+          )}
+          <CancellationEmailsPreview
+            contract={c}
+            merchant={STORE_NAME}
+            kinds={cx.stage === "accepted" ? ["request", "accepted"] : cx.stage === "rejected" ? ["request", "rejected"] : ["request"]}
+          />
           {cxPending && (
             <div className="mt-2.5 flex flex-wrap items-center gap-2.5">
               {cx.stage === "awaiting_customer" && (
@@ -414,9 +428,9 @@ Customer: ${c.customerName}`)}`}
                     <ExternalLink size={13} /> Open customer cancellation page
                   </a>
                   <button
-                    onClick={() => setCancelNotice(resendCancellationLink(c.id, config.contractReviewExpiryDays))}
+                    onClick={() => setCancelNotice(resendCancellationLink(c.id))}
                     disabled={!!cxResendWhy}
-                    title={cxResendWhy ?? "Send the cancellation link to the customer again"}
+                    title={cxResendWhy ?? "Email the cancellation link to the customer again (once per day)"}
                     className="flex items-center gap-1.5 rounded-lg border border-brand-blue bg-white px-3 py-1.5 text-[13px] font-medium text-brand-blue disabled:cursor-not-allowed disabled:border-border-color disabled:text-text-muted"
                     data-testid="cancel-resend"
                   >
@@ -444,7 +458,7 @@ Customer: ${c.customerName}`)}`}
                       onClick={() => {
                         cancellationDecided(c.id, true);
                         setSubscriptionStatus("Cancelled");
-                        setOccurrences((prev) => prev.map((o) => (o.status === "Scheduled" ? { ...o, status: "Cancelled" } : o)));
+                        setOccurrences((prev) => occurrencesAfterCancellation(prev));
                       }}
                       className="underline"
                       data-testid="sim-cx-accept"
@@ -686,7 +700,7 @@ Customer: ${c.customerName}`)}`}
         <div className="p-8" data-testid="cancel-dialog">
           <h2 className="mb-2 text-xl font-bold text-text-primary">Cancel contract {c.merchantRef}?</h2>
           <p className="mb-4 text-sm text-text-secondary">
-            Geidea sends {c.customerName} a link to sign the cancellation with UAE PASS. Once their bank accepts it (up to 1
+            Geidea emails {c.customerName} a link to sign the cancellation with UAE PASS. Once their bank accepts it (up to 1
             working day after signing), the contract is DD Cancelled and no further payments are collected. History and
             documents are kept.
           </p>
@@ -737,7 +751,7 @@ Customer: ${c.customerName}`)}`}
               disabled={!cancelValid}
               onClick={() => {
                 const pause = cancelPause && subscriptionStatus === "Active";
-                setCancelNotice(requestCancellation(c.id, cancelReason, cancelComments.trim(), pause, config.contractReviewExpiryDays));
+                setCancelNotice(requestCancellation(c.id, cancelReason, cancelComments.trim(), pause));
                 if (pause) setSubscriptionStatus("Paused");
                 setCancelOpen(false);
               }}

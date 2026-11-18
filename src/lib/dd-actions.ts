@@ -10,13 +10,15 @@ import {
   activityEvent,
   canDiscard,
   cancelReasonLabel,
-  cancellationLinkExpiry,
+  ddToday,
   formatCreatedOn,
+  formatDateNice,
   isCancellationPending,
   isLinkExpired,
   isUnsigned,
   maskEmail,
   maskMobile,
+  occurrencesAfterCancellation,
   resendLinkExpiry,
 } from "./direct-debit";
 import { DirectDebitContract } from "./types";
@@ -116,6 +118,10 @@ export function logActivity(id: string, actor: string, text: string): void {
 // call is simulated as successful (201 with ddcarid / ddcaid). Collections continue until the
 // customer signs; they stop once signed; the daily status check closes the contract or, if the
 // bank rejects, returns it to DD Active.
+// 18-Nov-2026 (Confluence v2.7): every customer message about a cancellation is EMAIL ONLY (no
+// SMS) — request (and resends), accepted, rejected. The link has no expiry; the merchant can
+// resend it once per day. On cancellation ACCP Geidea cancels the mandate on its side at once (no
+// separate DDA status inquiry); in-file payments run to the end, everything else stops.
 
 /** Why Cancel Contract is not available, or null when it is (US-21). */
 export function cancelBlockedReason(c: DirectDebitContract, canCancel: boolean): string | null {
@@ -132,8 +138,7 @@ export function requestCancellation(
   id: string,
   reasonCode: string,
   comments: string,
-  pauseCollections: boolean,
-  reviewExpiryDays: number
+  pauseCollections: boolean
 ): string {
   const c = record(id);
   if (!c) return "";
@@ -148,44 +153,44 @@ export function requestCancellation(
     requestedAt: formatCreatedOn(new Date()),
     stage: "awaiting_customer",
     pausedByCancellation: pauseCollections && c.subscriptionStatus === "Active",
-    linkExpiresAt: cancellationLinkExpiry(reviewExpiryDays),
+    lastSentOn: formatDateNice(ddToday()),
     notificationCount: 1,
   };
   if (c.cancellation.pausedByCancellation) c.subscriptionStatus = "Paused";
   const reason = `${cancelReasonLabel(reasonCode)} (${reasonCode})${comments ? ` — ${comments}` : ""}`;
   log(c, "Merchant user", `Cancellation requested: ${reason}. DDS cancellation request ${n} created${c.cancellation.pausedByCancellation ? "; collections paused" : ""}`);
-  log(c, "System", `Cancellation link sent to the customer by SMS and email; valid until ${c.cancellation.linkExpiresAt}`);
+  log(c, "System", "Cancellation request email sent to the customer (link to review and sign; no expiry)");
   persistIfCreated(c);
   saveCancellationOverlay(c);
   notifyContractsChanged();
-  const mobile = c.customerMobile ?? "0501234567";
   const email = c.customerEmail ?? "customer@example.com";
-  return `Cancellation request sent. The customer has been sent a link by SMS (${maskMobile(mobile)}) and email (${maskEmail(email)}) to sign it with UAE PASS. ${
+  return `Cancellation request sent. The customer has been emailed a link (${maskEmail(email)}) to sign it with UAE PASS. ${
     c.cancellation.pausedByCancellation
       ? "Collections are paused."
       : "Collections continue until the customer signs — pause the subscription to stop them now."
   }`;
 }
 
-/** Why the cancellation link can't be resent, or null (US-40). Allowed after expiry. */
+/** Why the cancellation link can't be resent, or null (US-40). Once per day (S8 §2.2, v2.7);
+ *  no cap on the number of days and no expiry — the DDS request never expires. */
 export function cancelResendBlockedReason(c: DirectDebitContract, canCancel: boolean): string | null {
   if (!canCancel) return "Your role doesn't include the Cancel Contract permission.";
   if (c.cancellation?.stage !== "awaiting_customer") return "The customer has already signed the cancellation.";
-  if (c.cancellation.notificationCount - 1 >= MAX_RESENDS) return `Maximum ${MAX_RESENDS} resends reached.`;
+  if (c.cancellation.lastSentOn === formatDateNice(ddToday())) return "Already emailed today — the link can be resent once per day (RESEND_LIMIT_REACHED).";
   return null;
 }
 
-export function resendCancellationLink(id: string, reviewExpiryDays: number): string {
+export function resendCancellationLink(id: string): string {
   const c = record(id);
   if (!c?.cancellation) return "";
   c.cancellation.notificationCount += 1;
-  c.cancellation.linkExpiresAt = cancellationLinkExpiry(reviewExpiryDays);
-  const used = c.cancellation.notificationCount - 1;
-  log(c, "Merchant user", `Cancellation link resent (${used} of ${MAX_RESENDS}); valid until ${c.cancellation.linkExpiresAt}`);
+  c.cancellation.lastSentOn = formatDateNice(ddToday());
+  log(c, "Merchant user", "Cancellation link resent to the customer by email");
   persistIfCreated(c);
   saveCancellationOverlay(c);
   notifyContractsChanged();
-  return `Cancellation link resent — resend ${used} of ${MAX_RESENDS}. The link is now valid until ${c.cancellation.linkExpiresAt}.`;
+  const email = c.customerEmail ?? "customer@example.com";
+  return `Cancellation link emailed again to ${maskEmail(email)}. You can resend it once per day; the link works until the customer signs.`;
 }
 
 /** US-41: the customer signed the cancellation (callback finished, confirmed with DDS). */
@@ -200,8 +205,8 @@ export function cancellationSigned(id: string): void {
   notifyContractsChanged();
 }
 
-/** Prototype: the daily cancellation status check (S8 §5) — bank accepted (ACCP → DDA CANC) or
- *  rejected (RJCT). Returns the occurrences after the change. */
+/** Prototype: the daily cancellation status check (S8 §5) — bank accepted (cancellation ACCP:
+ *  Geidea cancels the mandate on its side at once, no DDA status inquiry) or rejected (RJCT). */
 export function cancellationDecided(id: string, accepted: boolean, rejectReason = "Rejected by the customer's bank"): void {
   const c = record(id);
   if (!c?.cancellation || c.cancellation.stage !== "with_bank") return;
@@ -210,13 +215,15 @@ export function cancellationDecided(id: string, accepted: boolean, rejectReason 
     c.cancellation.stage = "accepted";
     c.status = "Cancelled";
     c.subscriptionStatus = "Cancelled";
-    c.occurrences = c.occurrences.map((o) => (o.status === "Scheduled" ? { ...o, status: "Cancelled" } : o));
+    c.occurrences = occurrencesAfterCancellation(c.occurrences);
     c.statusNote = `Cancelled at the customer's request — ${cancelReasonLabel(c.cancellation.reasonCode)}. History and documents are kept.`;
-    log(c, "DDS", "Cancellation accepted by the bank — direct debit cancelled (CANC); future collections cancelled");
+    log(c, "DDS", "Cancellation accepted by the bank (ACCP) — Geidea cancels the mandate (CANC). Payments already in a payment file run to the end; every other open collection is cancelled");
+    log(c, "System", "Email sent to the customer: direct debit cancelled");
   } else {
     c.cancellation.stage = "rejected";
     c.cancellation.rejectReason = rejectReason;
     log(c, "DDS", `Cancellation rejected: ${rejectReason}. Contract back to DD Active; collections resume${c.subscriptionStatus === "Paused" ? " once the subscription is resumed" : ""}`);
+    log(c, "System", "Email sent to the customer: the bank rejected the cancellation — contact your bank for more information");
   }
   persistIfCreated(c);
   saveCancellationOverlay(c);

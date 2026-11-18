@@ -450,8 +450,11 @@ export interface DDCancellation {
   requestedAt: string;
   stage: DDCancellationStage;
   pausedByCancellation: boolean;
-  linkExpiresAt: string;
-  notificationCount: number; // 1 = first send
+  /** 18-Nov-2026 (Confluence v2.7, S8 §2.2): the cancellation link has no expiry — it works while
+   *  the request awaits the customer's signature. Resend is limited to once per day; this is the
+   *  date ("18 Nov 2026") the link was last emailed. */
+  lastSentOn: string;
+  notificationCount: number; // 1 = first email; kept for the audit trail
   signedAt?: string;
   decidedAt?: string;
   rejectReason?: string;

@@ -15,7 +15,7 @@ export interface ChangelogEntry {
   description: string;
 }
 
-export const LAST_UPDATED = "26 Oct 2026";
+export const LAST_UPDATED = "18 Nov 2026";
 
 // Full history below covers Direct Debit specifically, back to its first release on the portal
 // (01 Sep 2026) — compiled 09 Sep 2026 from the repo's commit history across every session so far.
@@ -27,6 +27,11 @@ export const LAST_UPDATED = "26 Oct 2026";
 // pass on GitHub. Corrected back to match the actual shipped code (customer picks under TBFC,
 // confirmed live by Rabbani on 10-Sep-2026) rather than silently left stale.
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    date: "18 Nov 2026",
+    description:
+      "Direct Debit contract cancellation aligned to Confluence v2.7 (S8). (1) Customer messages are email only — no SMS — and the Contract Detail panel previews them: cancellation request, accepted, rejected by the bank. (2) The cancellation link no longer expires; the merchant can resend it once per day (was up to 5 resends with an expiry). (3) The customer page and the 'left before signing' message say the direct debit stays active, and payments can still be collected, until they sign. (4) When the bank accepts, Geidea cancels the mandate at once: payments already in a payment file run to the end; Scheduled, Skipped and Error collections become Cancelled and a Rejected collection awaiting retry becomes Failed.",
+  },
   {
     date: "26 Oct 2026",
     description:

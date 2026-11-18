@@ -114,7 +114,7 @@ export const DD_FIELD_HINTS = {
   "cfg.action.pauseResume": toggle("Pause / resume", "allow_pause_resume", "true", "Checked in S7 §1."),
   "cfg.action.edit": toggle("Amend a collection", "allow_edit_collection", "true", "Checked in S7 §2 (rule A1)."),
   "cfg.action.retry": toggle("Retry a rejected collection", "allow_retry_collection", "true", "Checked in S6 §1.1."),
-  "cfg.action.cancel": toggle("Cancel contract", "allow_cancel_contract", "true", "Checked in S8 (parked)."),
+  "cfg.action.cancel": toggle("Cancel contract", "allow_cancel_contract", "true", "Checked in S8 §1 (start a cancellation) and §2.2 (resend the cancellation link, once per day)."),
   "cfg.action.bulk": toggle("Bulk contract upload", "allow_bulk_upload", "true", "Checked in S9."),
 
   // ---------------- DD BE Config (S1 §2) ----------------
@@ -685,11 +685,12 @@ export const DD_FIELD_HINTS = {
     lines: [{ system: "Order Model", ref: "Subscription.status = Active · resumed_at" }],
   },
   "act.cancel": {
-    title: "Cancel mandate",
+    title: "Cancel contract",
     direction: "push",
-    endpoint: "POST /direct-debit/v1/contracts/{mandateId}/cancel (S8 — parked)",
+    endpoint: "POST /direct-debit/v1/contracts/{mandateId}/cancellation (S8 §1)",
+    note: "Customer messages are email only (no SMS): request + once-a-day resends, accepted, rejected (S8 §3.7). The link has no expiry. On cancellation ACCP Geidea cancels the mandate at once — no DDA status inquiry.",
     lines: [
-      { system: "BE API", ref: "{ reasonCode, originatorComments }" },
+      { system: "BE API", ref: "{ reasonCode, comments, pauseCollections }" },
       { system: "DDS", ref: "POST /v1/merchant/direct-debit-authorities/{ddaId}/cancellation" },
     ],
   },

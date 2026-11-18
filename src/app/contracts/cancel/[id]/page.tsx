@@ -5,18 +5,22 @@
 // the contract review page; the customer signs DDS's cancellation form with UAE PASS
 // (ddarId = ddcarId). Geidea confirms the result with DDS — never the redirect alone.
 // Prototype: the route takes the contract id; the real link carries the cancellation id.
+// 18-Nov-2026 (Confluence v2.7): the link has no expiry — it works while the request awaits the
+// customer's signature, so the "link expired" state is gone. The page and the "left before
+// signing" message tell the customer the cancellation is not effective until they sign (DDS
+// go-live checklist).
 
 import { use, useEffect, useState } from "react";
-import { Loader2, Ban, CheckCircle2, Clock, ShieldCheck, FileText } from "lucide-react";
+import { Loader2, Ban, CheckCircle2, ShieldCheck, FileText, Info } from "lucide-react";
 import { useContract } from "@/lib/dd-contract-store";
 import { STORE_NAME } from "@/lib/mock-data";
-import { cancelReasonLabel, ddToday, diffDays, parseNiceDate } from "@/lib/direct-debit";
+import { cancelReasonLabel } from "@/lib/direct-debit";
 import { cancellationSigned } from "@/lib/dd-actions";
 import { DirectDebitContract } from "@/lib/types";
 import CustomerVerification, { CustomerPageHeader } from "@/components/directdebit/CustomerVerification";
 import { DevHintsFloatingToggle } from "@/components/directdebit/FieldHint";
 
-type PageState = "NOT_AVAILABLE" | "ALREADY_SIGNED" | "EXPIRED" | "OTP_REQUIRED" | "READY";
+type PageState = "NOT_AVAILABLE" | "ALREADY_SIGNED" | "OTP_REQUIRED" | "READY";
 type Outcome = "finished" | "failed" | "ddsError" | "canceled";
 type Step = "review" | "signing" | "signed" | "failed" | "left";
 
@@ -24,7 +28,6 @@ function initialPageState(c: DirectDebitContract | undefined): PageState {
   const cx = c?.cancellation;
   if (!c || !cx || c.status !== "Active" || cx.stage === "accepted" || cx.stage === "rejected") return "NOT_AVAILABLE";
   if (cx.stage === "with_bank") return "ALREADY_SIGNED";
-  if (diffDays(ddToday(), parseNiceDate(cx.linkExpiresAt)) < 0) return "EXPIRED";
   return "OTP_REQUIRED";
 }
 
@@ -56,9 +59,7 @@ function CancelFlow({ contract }: { contract: DirectDebitContract | undefined })
   const view =
     state === "ALREADY_SIGNED"
       ? { icon: <CheckCircle2 size={30} className="text-status-completed" />, title: "You have already signed this cancellation.", body: "Your bank processes it within 1 working day. There's nothing else you need to do." }
-      : state === "EXPIRED"
-        ? { icon: <Clock size={30} className="text-status-pending" />, title: "This link has expired.", body: `Ask ${STORE_NAME} to send you a new one.` }
-        : { icon: <Ban size={30} className="text-status-declined" />, title: "This cancellation is no longer available.", body: `Contact ${STORE_NAME}.` };
+      : { icon: <Ban size={30} className="text-status-declined" />, title: "This cancellation is no longer available.", body: `Contact ${STORE_NAME}.` };
   return (
     <div>
       <CustomerPageHeader />
@@ -109,6 +110,10 @@ function CancelReviewSign({ contract: c }: { contract: DirectDebitContract }) {
         <div className="text-center">
           {step === "review" && (
             <>
+              <p className="mx-auto mb-4 flex max-w-md items-start gap-2 rounded-lg border border-status-pending bg-status-pending/10 px-3 py-2 text-left text-[13px] text-text-primary" data-testid="cx-not-effective">
+                <Info size={15} className="mt-0.5 shrink-0" />
+                Your direct debit stays active, and payments can still be collected, until you sign this cancellation.
+              </p>
               <p className="mx-auto mb-4 max-w-md rounded-lg bg-page-bg px-3 py-2 text-[12.5px] text-text-secondary">
                 Forgot your UAE PASS signing password? Reset it in UAE PASS › Profile › Reset signing password.
               </p>
@@ -150,7 +155,7 @@ function CancelReviewSign({ contract: c }: { contract: DirectDebitContract }) {
               <div className="text-sm font-semibold text-text-primary">{step === "failed" ? "Signing didn't go through." : "Signing wasn't completed."}</div>
               <div className="max-w-md text-[12.5px] text-text-muted">
                 {step === "left"
-                  ? "You left before signing. You can sign whenever you're ready while the link is valid."
+                  ? "You left before signing. Your direct debit stays active, and payments can still be collected, until you sign. You can sign whenever you're ready."
                   : outcome === "ddsError"
                     ? "Something went wrong on our side. Nothing has been signed — please try again."
                     : "Something went wrong with UAE PASS. Nothing has been signed — please try again."}

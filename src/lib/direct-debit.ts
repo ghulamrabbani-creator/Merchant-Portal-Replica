@@ -448,10 +448,17 @@ export function resendLinkExpiry(createdOn: string, status: DDContractStatus, re
   return `${formatDateNice(exp)}, 11:59 PM`;
 }
 
-/** Cancellation link (S8 §2): end of day, today + contract_review_expiry_days. No DDS cap — the
- *  DDS cancellation request never expires, so it can be resent after the link has expired. */
-export function cancellationLinkExpiry(reviewExpiryDays = 7, today: Date = ddToday()): string {
-  return `${formatDateNice(addDays(today, reviewExpiryDays))}, 11:59 PM`;
+/** 18-Nov-2026 (Confluence v2.7, S8 rule 8 / §4.3): once the bank accepts a cancellation, what is
+ *  already in a generated payment file (Submitted, including a representment in flight) runs to
+ *  its final status; every other open item stops. Scheduled, Skipped and Error collections become
+ *  Cancelled; a Rejected collection waiting for a retry is final (Failed) — no retry,
+ *  representment, rollover or Amend. Paid, Failed and Cancelled are unchanged. */
+export function occurrencesAfterCancellation(occurrences: DirectDebitOccurrence[]): DirectDebitOccurrence[] {
+  return occurrences.map((o) => {
+    if (o.status === "Scheduled" || o.status === "Skipped" || o.status === "Error") return { ...o, status: "Cancelled" };
+    if (o.status === "Rejected") return { ...o, status: "Failed" };
+    return o;
+  });
 }
 
 /** True once the review link's last day has passed (US-15: resend refused, link refused). */
