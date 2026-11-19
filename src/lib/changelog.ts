@@ -15,7 +15,7 @@ export interface ChangelogEntry {
   description: string;
 }
 
-export const LAST_UPDATED = "18 Nov 2026";
+export const LAST_UPDATED = "19 Nov 2026";
 
 // Full history below covers Direct Debit specifically, back to its first release on the portal
 // (01 Sep 2026) — compiled 09 Sep 2026 from the repo's commit history across every session so far.
@@ -27,6 +27,11 @@ export const LAST_UPDATED = "18 Nov 2026";
 // pass on GitHub. Corrected back to match the actual shipped code (customer picks under TBFC,
 // confirmed live by Rabbani on 10-Sep-2026) rather than silently left stale.
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    date: "19 Nov 2026",
+    description:
+      "Direct Debit test data. (1) New \"Reset test data\" in this bar: removes contracts created in this browser, clears saved cancellation requests and reloads Direct Debit, so every demo contract is back to its starting state and dated from today; optional tick box also resets PGW Config in MA, DD BE Config, the prototype role and Dev hints. (2) Twelve demo contracts added so every status and situation has a record: Link Expired, DD Request Expired, Contract Discarded, DDS No Answer (Not Submitted, outcome unknown), Resend Limit Reached (5 of 5 resends used), Contract Completed (DD Expired, Subscription Completed), Retry In Progress (Representment Pending), Skipped Collections (not active in time, missed payment file, minimum gap with automatic rollover), Last Collection Failed (no later collection to roll onto), and cancellation awaiting the customer, with the bank and rejected by the bank. (3) Contract Cancelled now carries its accepted cancellation request. (4) Fixes: Mandate Rejected and Contract Cancelled show Subscription Cancelled (was Active), per the mandate status table (S4 section 3); new subscription value Completed for DD Expired.",
+  },
   {
     date: "18 Nov 2026",
     description:

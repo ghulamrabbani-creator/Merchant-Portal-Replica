@@ -254,7 +254,8 @@ export type DDBankAccountType = "Current" | "Savings";
 /** Subscription-level only — independent of the Mandate's own DDContractStatus above.
  *  See Notes/Projects/Direct Debit.md, Contract Detail screen §Pause: Pause suspends the
  *  Subscription only, the Mandate stays Active throughout. */
-export type DDSubscriptionStatus = "Active" | "Paused" | "Cancelled";
+/** "Completed" (19-Nov-2026): the mandate reached its end date (EXPR) — Confluence S4 §3. */
+export type DDSubscriptionStatus = "Active" | "Paused" | "Cancelled" | "Completed";
 
 // Occurrence statuses (reworked 25-Sep-2026 to match Backend Stories S5/S6):
 //  - Scheduled: not yet sent to DDS (payment_created = false). Only these can be amended (S7 §2).

@@ -131,3 +131,40 @@ export function useAllContracts(): DirectDebitContract[] {
   if (ready) hydrateFromStorage();
   return directDebitContracts;
 }
+
+// ---- Reset test data (19-Nov-2026) ----
+// Everything the prototype keeps in this browser lives under "mpr:dd-" keys. Test data = the
+// contracts created here and the cancellation state saved for any contract (demo ones too).
+// Settings = PGW Config in MA, DD BE Config, the prototype role and the Dev hints switch.
+// Actions on demo contracts (pause, retry, amend, discard…) only live in memory, so the reload
+// that follows the reset brings every demo contract back exactly as defined in mock-data.ts,
+// re-dated against today.
+const TEST_DATA_KEYS = [KEY, CX_KEY];
+const DD_KEY_PREFIX = "mpr:dd-";
+
+/** What a reset would clear in this browser — shown in the confirmation dialog. */
+export function testDataSummary(): { created: number; cancellations: number; settings: number } {
+  try {
+    const settings = Object.keys(window.localStorage).filter(
+      (k) => k.startsWith(DD_KEY_PREFIX) && !TEST_DATA_KEYS.includes(k)
+    ).length;
+    return { created: Object.keys(readAll()).length, cancellations: Object.keys(readCx()).length, settings };
+  } catch {
+    return { created: 0, cancellations: 0, settings: 0 };
+  }
+}
+
+/** Clears this browser's Direct Debit test data (and, if asked, its settings), then reloads the
+ *  Contract List so the demo contracts start fresh. */
+export function resetTestData(includeSettings: boolean) {
+  try {
+    const keys = includeSettings
+      ? Object.keys(window.localStorage).filter((k) => k.startsWith(DD_KEY_PREFIX))
+      : TEST_DATA_KEYS;
+    keys.forEach((k) => window.localStorage.removeItem(k));
+  } catch {
+    /* storage unavailable — nothing was saved, the reload still resets memory */
+  }
+  // Full page load (not router.push): only a fresh load rebuilds the demo contracts from mock-data.ts.
+  window.location.assign(new URL("/direct-debit", window.location.origin).href);
+}

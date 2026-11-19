@@ -5,6 +5,7 @@ import Modal from "@/components/ui/Modal";
 import { LAST_UPDATED, CHANGELOG } from "@/lib/changelog";
 import PGWConfigModal from "@/components/directdebit/PGWConfigModal";
 import DDBEConfigModal from "@/components/directdebit/DDBEConfigModal";
+import ResetTestDataModal from "@/components/directdebit/ResetTestDataModal";
 import { useDDConfig } from "@/lib/dd-config-context";
 
 // Dev-reference banner (added Sep 2026, Rabbani) — spans the full width above the portal's own
@@ -15,6 +16,7 @@ export default function ChangeLogBar() {
   const [open, setOpen] = useState(false);
   const [pgwConfigOpen, setPgwConfigOpen] = useState(false);
   const [beConfigOpen, setBeConfigOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
   const { devHints, setDevHints } = useDDConfig();
 
   return (
@@ -41,6 +43,15 @@ export default function ChangeLogBar() {
           className="underline underline-offset-2 hover:text-red-300"
         >
           DD BE Config
+        </button>
+        <span className="text-red-400/40">|</span>
+        <button
+          onClick={() => setResetOpen(true)}
+          className="underline underline-offset-2 hover:text-red-300"
+          title="Clear contracts created in this browser and put the demo contracts back to their starting state"
+          data-testid="reset-test-data"
+        >
+          Reset test data
         </button>
         <span className="text-red-400/40">|</span>
         {/* Dev hints (added 25-Sep-2026): shows the ⓘ parameter-mapping icons on the Direct Debit
@@ -94,6 +105,7 @@ export default function ChangeLogBar() {
         <PGWConfigModal open={pgwConfigOpen} onClose={() => setPgwConfigOpen(false)} />
       )}
       {beConfigOpen && <DDBEConfigModal open={beConfigOpen} onClose={() => setBeConfigOpen(false)} />}
+      {resetOpen && <ResetTestDataModal open={resetOpen} onClose={() => setResetOpen(false)} />}
     </>
   );
 }
