@@ -243,7 +243,7 @@ function Submitted({ c }: { c: DirectDebitContract }) {
                       testId="dds-request"
                     />
                     <p className="mt-2 text-[11.5px] text-text-muted">
-                      Basic auth with the DDS credentials of the merchant&apos;s OIC (569000143 — Geidea). Dates dd/MM/yyyy.
+                      Basic auth with the DDS credentials of the merchant&apos;s OIC (560000001 — Geidea). Dates dd/MM/yyyy.
                       Never sent: notes, contractDescription, OIC, and anything about the schedule or rollover.
                     </p>
                   </>

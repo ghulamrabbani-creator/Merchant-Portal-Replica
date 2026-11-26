@@ -279,8 +279,8 @@ function ConfigScreen({ onClose }: { onClose: () => void }) {
                         </div>
                         <div className="fhalf">
                           <div className="fld"><div className="in">
-                            <label>OIC<FieldHint k="cfg.oic" value="oic_id = 569000143 (Geidea)" /></label>
-                            <div className="ro" data-testid="oic-readonly">Geidea OIC (569000143)</div>
+                            <label>OIC<FieldHint k="cfg.oic" value="oic_id = 560000001 (Geidea)" /></label>
+                            <div className="ro" data-testid="oic-readonly">Geidea OIC (560000001)</div>
                           </div></div>
                           <div className="frow"><span>Only option in the MVP. Merchant OIC is Phase 2.</span></div>
                         </div>
