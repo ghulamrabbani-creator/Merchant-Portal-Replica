@@ -15,7 +15,7 @@ export interface ChangelogEntry {
   description: string;
 }
 
-export const LAST_UPDATED = "19 Nov 2026";
+export const LAST_UPDATED = "26 Nov 2026";
 
 // Full history below covers Direct Debit specifically, back to its first release on the portal
 // (01 Sep 2026) — compiled 09 Sep 2026 from the repo's commit history across every session so far.
@@ -27,6 +27,11 @@ export const LAST_UPDATED = "19 Nov 2026";
 // pass on GitHub. Corrected back to match the actual shipped code (customer picks under TBFC,
 // confirmed live by Rabbani on 10-Sep-2026) rather than silently left stale.
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    date: "26 Nov 2026",
+    description:
+      "PGW Config in MA redesigned on the real Backoffice Payment Gateway Configuration screen (saved PGW Configuration template): Geidea shell, tab strip with a NEW \"Direct Debit Settings\" tab after Visa installment and before NOTIFICATION, Direct Debit master switch with its settings beneath it, Geidea toggles and grey floating-label fields. Changes now apply on \"Save changes\" (was: instantly); Save is disabled until something changes, \"Discard Changes\" restores the saved values, and an out-of-range value blocks Save with a red field and \"Changes not saved. Fix the highlighted fields.\" Reset to defaults and Close sit in a black prototype strip at the top. Settings and their effects are unchanged.",
+  },
   {
     date: "19 Nov 2026",
     description:
