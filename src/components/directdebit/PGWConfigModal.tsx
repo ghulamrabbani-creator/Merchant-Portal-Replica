@@ -15,8 +15,10 @@
 //
 // Saved values go to DDConfigContext (persisted per browser), which the rest of the Direct Debit
 // UI reads: Sidebar (Enable), contract creation and Sign page (Credit Card), summary screen (Bulk
-// Upload), lead time and review expiry. The black strip at the top is prototype-only (Reset to
-// defaults, Close); everything below it follows the Geidea design.
+// Upload), lead time and review expiry. Everything follows the Geidea design.
+// 26-Nov-2026 (Rabbani): shown as a modal with only the tab strip and the Direct Debit Settings card
+// (the reference to the existing design); the Backoffice shell, prototype strip and Reset are gone.
+// The × closes without saving (Save and Discard stay disabled until something changes).
 //
 // The 13 existing tabs are listed and clickable so the position of the new tab is clear; their
 // fields are not repeated here (they are unchanged by Direct Debit — see the template).
@@ -69,25 +71,14 @@ const num = (s: string) => Number(s.replace(/,/g, "").trim());
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
 .gx{--blue:#2F8CFF;--ink:#1f2d3d;--sub:#5f6b7a;--muted:#8a94a3;--line:#e6e9ee;--page:#e4e4e4;--pill:#f3f3f3;--red:#e03a3a;--amber:#9a6a00;--amber-bg:#fff6e0;--toggle-off:#c4c4c4;--orange:#f26a21;
-  position:fixed;inset:0;z-index:60;background:var(--page);font-family:Montserrat,"Segoe UI",Arial,sans-serif;color:var(--ink);font-size:13px;overflow:auto}
+  position:fixed;inset:0;z-index:60;background:rgba(15,23,42,.45);font-family:Montserrat,"Segoe UI",Arial,sans-serif;color:var(--ink);font-size:13px;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:4vh 16px}
+.gx .mdl{position:relative;width:100%;max-width:968px;background:#fff;border-radius:10px;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+.gx .mhead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px 10px 28px}
+.gx .mhead h2{margin:0;font-size:15px;font-weight:600}
+.gx .x{width:32px;height:32px;border-radius:8px;border:none;background:#f3f3f3;color:var(--ink);font-size:20px;line-height:1;cursor:pointer;display:grid;place-items:center;flex:none}
+.gx .x:hover{background:#e8e8e8}.gx .x:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .gx *{box-sizing:border-box}
-.gx .proto{position:sticky;top:0;z-index:4;height:30px;background:#000;color:#f87171;display:flex;align-items:center;justify-content:center;gap:10px;font:500 12px system-ui,sans-serif}
-.gx .proto button{background:none;border:none;color:inherit;text-decoration:underline;text-underline-offset:2px;cursor:pointer;font:inherit}
-.gx .proto button:hover{color:#fca5a5}.gx .proto .sep{color:rgba(248,113,113,.4)}
-.gx .top{position:sticky;top:30px;z-index:3;height:64px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 24px 0 18px;box-shadow:0 1px 0 #ececec}
-.gx .logo{width:22px;height:22px;border-radius:6px;background:var(--orange);color:#fff;font-weight:700;display:grid;place-items:center;font-size:14px}
-.gx .tright{display:flex;gap:16px;align-items:center}
-.gx .chip{background:#f4f4f4;border-radius:22px;padding:7px 14px;display:flex;align-items:center;gap:10px;font-size:12px;max-width:330px}
-.gx .chip b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}.gx .chip .imp{color:var(--blue);font-size:11.5px}
-.gx .layout{display:flex}
-.gx .side{position:sticky;top:94px;align-self:flex-start;height:calc(100vh - 94px);width:64px;flex:none;background:#fff;display:flex;flex-direction:column;align-items:center;gap:22px;padding-top:22px}
-.gx .side svg{width:20px;height:20px;stroke:#4b5563;fill:none;stroke-width:1.6}.gx .side .on svg{stroke:var(--blue)}
-.gx .main{flex:1;min-width:0;padding:22px 16px 60px}
-.gx .wrap{max-width:968px;margin:0 auto}
-.gx .inst{display:flex;justify-content:flex-end;padding-right:24px;margin-bottom:12px}
-.gx .inst .box{width:230px}.gx .inst label{display:block;font-size:12.5px;color:var(--muted)}
-.gx .inst select{border:none;background:transparent;font:inherit;font-size:13px;color:var(--ink);padding:2px 0;width:100%}
-.gx .card{background:#fff;border-radius:6px;padding:0 0 22px}
+.gx .card{background:#fff;border-radius:0 0 10px 10px;padding:0 0 22px}
 .gx .tabs{display:flex;align-items:stretch;padding:0 4px;border-bottom:1px solid #f0f0f0}
 .gx .arr{width:22px;display:grid;place-items:center;color:#333;font-size:15px;cursor:pointer;user-select:none;background:none;border:none}
 .gx .tabstrip{display:flex;overflow:hidden;flex:1;scroll-behavior:smooth}
@@ -128,7 +119,7 @@ const CSS = `
 .gx .existing{color:var(--sub);font-size:12.5px;padding:26px 0 6px;line-height:1.6}
 .gx .existing b{color:var(--ink);font-weight:600}
 .gx .mono{font-family:Consolas,Menlo,monospace}
-@media (max-width:760px){.gx .side{display:none}.gx .body{padding:14px 16px 0}.gx .chip{max-width:170px}.gx .chip.user{display:none}.gx .trow{flex-wrap:wrap}}
+@media (max-width:760px){.gx{padding:0}.gx .mdl{border-radius:0;min-height:100%}.gx .body{padding:14px 16px 0}.gx .mhead{padding-left:16px}.gx .trow{flex-wrap:wrap}}
 @media (prefers-reduced-motion:reduce){.gx .tg::after{transition:none}.gx .tabstrip{scroll-behavior:auto}}
 `;
 
@@ -170,20 +161,18 @@ function NumField({ label, value, onChange, unit, prefix, hint, hintKey, hintVal
 }
 
 export default function PGWConfigModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  // Bumped on "Reset to defaults" so the screen remounts and re-seeds its draft from the defaults.
-  const [resetKey, setResetKey] = useState(0);
   if (!open || typeof document === "undefined") return null;
-  return <ConfigScreen key={resetKey} onClose={onClose} onReset={() => setResetKey((k) => k + 1)} wasReset={resetKey > 0} />;
+  return <ConfigScreen onClose={onClose} />;
 }
 
-function ConfigScreen({ onClose, onReset, wasReset }: { onClose: () => void; onReset: () => void; wasReset: boolean }) {
-  const { config, setConfig, resetMerchantConfig } = useDDConfig();
+function ConfigScreen({ onClose }: { onClose: () => void }) {
+  const { config, setConfig } = useDDConfig();
   const saved = useMemo(() => toDraft(config), [config]);
   // Mounted only while open (see ChangeLogBar), so this seeds from the hydrated, persisted value.
   const [draft, setDraft] = useState<Draft>(saved);
   const [active, setActive] = useState(TABS.indexOf(DD_TAB));
   const [tried, setTried] = useState(false);
-  const [notice, setNotice] = useState<"" | "saved" | "reset">(wasReset ? "reset" : "");
+  const [notice, setNotice] = useState<"" | "saved">("");
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -228,47 +217,18 @@ function ConfigScreen({ onClose, onReset, wasReset }: { onClose: () => void; onR
     setNotice("saved");
   }
   function discard() { setDraft(saved); setTried(false); setNotice(""); }
-  function reset() { resetMerchantConfig(); onReset(); }
 
   const onDD = TABS[active] === DD_TAB;
 
   return createPortal(
-    <div className="gx" role="dialog" aria-modal="true" aria-label="PGW Configuration (prototype)" data-testid="pgw-config-screen">
+    <div className="gx" role="dialog" aria-modal="true" aria-labelledby="gx-title" data-testid="pgw-config-screen"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <style>{CSS}</style>
-      <div className="proto">
-        <span>Prototype · PGW Config in MA (Backoffice → Payment Gateway → Configuration)</span>
-        <span className="sep">|</span>
-        <button type="button" onClick={reset} data-testid="pgw-config-reset">Reset to defaults</button>
-        <span className="sep">|</span>
-        <button type="button" onClick={onClose} data-testid="pgw-config-close">Close</button>
-      </div>
-      <div className="top">
-        <div className="logo">g</div>
-        <div className="tright">
-          <div className="chip">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="1.6"><path d="M3 9l2-5h14l2 5M4 9v11h16V9M4 9h16" /></svg>
-            <div style={{ minWidth: 0 }}><b>B00000000001 - Test Merchant</b><div className="imp">Impersonating</div></div>
-          </div>
-          <div className="chip user">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="1.6"><circle cx="12" cy="8" r="4" /><path d="M4 21c1-4 5-6 8-6s7 2 8 6" /></svg>
-            <div><b>test.user@example.com</b><div style={{ fontSize: 11 }}>System Administrator</div></div>
-          </div>
-        </div>
-      </div>
-      <div className="layout">
-        <nav className="side" aria-hidden="true">
-          <div className="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9h-6v-6H9v6H3z" /></svg></div>
-          <div><svg viewBox="0 0 24 24"><path d="M3 4h2l2 11h11l2-8H7" /><circle cx="9" cy="19" r="1.5" /><circle cx="17" cy="19" r="1.5" /></svg></div>
-          <div><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M8 7h8M8 11h8" /></svg></div>
-          <div><svg viewBox="0 0 24 24"><path d="M3 13l3-8h12l3 8v6H3z" /><path d="M3 13h5l1 2h6l1-2h5" /></svg></div>
-          <div><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="10" r="3" /><path d="M6 18c2-2 4-3 6-3s4 1 6 3" /></svg></div>
-          <div><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z" /><path d="M10 10h4M12 8v6" /></svg></div>
-          <div><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="1" /><path d="M3 6l9 7 9-7" /></svg></div>
-        </nav>
-        <main className="main">
-          <div className="wrap">
-            <div className="inst"><div className="box"><label htmlFor="gx-inst">gateway_Instance</label>
-              <select id="gx-inst" defaultValue="Live instance"><option>Live instance</option><option>Test instance</option></select></div></div>
+      <div className="mdl">
+            <div className="mhead">
+              <h2 id="gx-title">Payment Gateway Configuration</h2>
+              <button type="button" className="x" onClick={onClose} aria-label="Close without saving" title="Close" data-testid="pgw-config-close" autoFocus>×</button>
+            </div>
             <div className="card">
               <div className="tabs">
                 <button type="button" className="arr" aria-label="Scroll tabs left" onClick={() => document.getElementById("gx-strip")?.scrollBy({ left: -300 })}>‹</button>
@@ -356,7 +316,6 @@ function ConfigScreen({ onClose, onReset, wasReset }: { onClose: () => void; onR
                     )}
 
                     {notice === "saved" && <div className="banner ok" role="status">Changes saved.</div>}
-                    {notice === "reset" && <div className="banner info" role="status">Prototype settings reset to their defaults.</div>}
                     {tried && hasErr && draft.featureEnabled && <div className="banner err" role="alert">Changes not saved. Fix the highlighted fields.</div>}
                     <div className="acts">
                       <button type="button" className="btn sec" onClick={discard} disabled={!dirty} data-testid="cfg-discard">Discard Changes</button>
@@ -366,8 +325,6 @@ function ConfigScreen({ onClose, onReset, wasReset }: { onClose: () => void; onR
                 )}
               </div>
             </div>
-          </div>
-        </main>
       </div>
     </div>,
     document.body,
